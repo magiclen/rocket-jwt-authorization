@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=UTF-8>
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Login</title>
+    <style>
+        .w-256p {
+            width: 256px;
+        }
+
+        .w-256p input, .w-256p button {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .mt-05 {
+            margin-top: 0.5rem;
+        }
+
+        .mt-1 {
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+<form class="w-256p" method="post" action="/login">
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text">
+    <label class="mt-05" for="password">Password</label>
+    <input id="password" name="password" type="password">
+    <button id="submit" class="mt-1" type="submit">Login</button>
+</form>
+
+<div id="inline-badge" class="mt-1"></div>
+
+{% if message %}
+<div class="mt-1">
+    {{message}}
+</div>
+{% endif %}
+
+</body>

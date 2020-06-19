@@ -1,0 +1,42 @@
+[package]
+name = "rocket-jwt-authorization"
+version = "0.1.0"
+authors = ["Magic Len <len@magiclen.org>"]
+edition = "2018"
+repository = "https://github.com/magiclen/rocket-jwt-authorization"
+homepage = "https://magiclen.org/rocket-jwt-authorization"
+keywords = ["rocket", "server", "web", "authorization", "jwt"]
+categories = ["parser-implementations", "web-programming"]
+description= "This crate provides a procedure macro to create request guards used for authorization."
+readme = "README.md"
+license = "MIT"
+
+[badges.travis-ci]
+repository = "magiclen/rocket-jwt-authorization"
+branch = "master"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+syn = {version = "1", features = ["full"]}
+quote = "1"
+
+[dev-dependencies]
+serde = "1"
+serde_derive = "1"
+
+rocket = "0.4.5"
+rocket-include-tera = "0.4.13"
+
+lazy_static = "1"
+regex = "1"
+
+jwt = "0.8"
+hmac = "0.8"
+sha2 = "0.9"
+
+[dev-dependencies.validators]
+version = "0.20"
+features = ["rocketly"]
