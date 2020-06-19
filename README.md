@@ -3,7 +3,7 @@
 
 [![Build Status](https://travis-ci.org/magiclen/rocket-jwt-authorization.svg?branch=master)](https://travis-ci.org/magiclen/rocket-jwt-authorization)
 
-This crate provides a procedure macro to create request guards used for authorization.
+This crate provides a procedural macro to create request guards used for authorization.
 
 See `examples`.
 

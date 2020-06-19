@@ -1,7 +1,7 @@
 /*!
 # `jwt-authorization` Request Guard for Rocket Framework
 
-This crate provides a procedure macro to create request guards used for authorization.
+This crate provides a procedural macro to create request guards used for authorization.
 
 See `examples`.
 */

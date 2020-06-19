@@ -1,13 +1,13 @@
 [package]
 name = "rocket-jwt-authorization"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Magic Len <len@magiclen.org>"]
 edition = "2018"
 repository = "https://github.com/magiclen/rocket-jwt-authorization"
 homepage = "https://magiclen.org/rocket-jwt-authorization"
 keywords = ["rocket", "server", "web", "authorization", "jwt"]
 categories = ["parser-implementations", "web-programming"]
-description= "This crate provides a procedure macro to create request guards used for authorization."
+description= "This crate provides a procedural macro to create request guards used for authorization."
 readme = "README.md"
 license = "MIT"
 
