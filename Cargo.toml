@@ -1,6 +1,6 @@
 [package]
 name = "rocket-jwt-authorization"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Magic Len <len@magiclen.org>"]
 edition = "2018"
 repository = "https://github.com/magiclen/rocket-jwt-authorization"
@@ -19,7 +19,6 @@ branch = "master"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1"
 syn = {version = "1", features = ["full"]}
 quote = "1"
 
