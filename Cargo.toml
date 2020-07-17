@@ -1,6 +1,6 @@
 [package]
 name = "rocket-jwt-authorization"
-version = "0.1.5"
+version = "0.1.6"
 authors = ["Magic Len <len@magiclen.org>"]
 edition = "2018"
 repository = "https://github.com/magiclen/rocket-jwt-authorization"
@@ -20,7 +20,7 @@ branch = "master"
 proc-macro = true
 
 [dependencies]
-syn = {version = "1", features = ["full"]}
+syn = { version = "1", features = ["full"] }
 quote = "1"
 
 [dev-dependencies]
@@ -30,13 +30,14 @@ serde_derive = "1"
 rocket = "0.4.5"
 rocket-include-tera = "0.4.13"
 
-lazy_static = "1"
-regex = "1"
+once_cell = "1"
 
 jwt = "0.9"
 hmac = "0.8"
 sha2 = "0.9"
 
-[dev-dependencies.validators]
-version = "0.20"
-features = ["rocketly"]
+validators = "0.21"
+
+[dev-dependencies.validators-derive]
+version = "0.21"
+features = ["rocket", "regex"]

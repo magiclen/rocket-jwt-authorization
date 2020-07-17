@@ -4,12 +4,11 @@
 extern crate rocket_include_tera;
 
 #[macro_use]
+extern crate validators_derive;
+
 extern crate validators;
 
-#[macro_use]
-extern crate lazy_static;
-
-extern crate regex;
+extern crate once_cell;
 
 #[macro_use]
 extern crate rocket;
@@ -29,10 +28,6 @@ extern crate sha2;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use validators::ValidatedCustomizedStringError;
-
-use regex::Regex;
-
 use jwt::RegisteredClaims;
 
 use rocket::http::Cookies;
@@ -42,20 +37,29 @@ use rocket::State;
 
 use rocket_include_tera::{TeraContextManager, TeraResponse};
 
+use validators::prelude::*;
+use validators::RegexError;
+use validators_prelude::regex::Regex;
+
+use once_cell::sync::Lazy;
+
 static SECRET_KEY: &str = "cc818bd5-6d16-4a67-b109-43d22d252f88";
 
-lazy_static! {
-    static ref RE_USERNAME: Regex = Regex::new(r"^\w{1,30}$").unwrap();
-    static ref RE_PASSWORD: Regex = Regex::new(r"^[\S ]{8,}$").unwrap();
-}
+static RE_USERNAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w{1,30}$").unwrap());
+static RE_PASSWORD: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[\S ]{8,}$").unwrap());
 
-validated_customized_regex_string!(Username, ref RE_USERNAME);
-validated_customized_regex_string!(Password, ref RE_PASSWORD);
+#[derive(Debug, Clone, Validator)]
+#[validator(regex(RE_USERNAME))]
+pub struct Username(String);
+
+#[derive(Debug, Clone, Validator)]
+#[validator(regex(RE_PASSWORD))]
+pub struct Password(String);
 
 #[derive(Debug, FromForm)]
 struct LoginModel {
-    username: Result<Username, ValidatedCustomizedStringError>,
-    password: Result<Password, ValidatedCustomizedStringError>,
+    username: Result<Username, RegexError>,
+    password: Result<Password, RegexError>,
 }
 
 #[derive(Serialize, Deserialize, JWT)]
@@ -76,7 +80,7 @@ fn login_post(model: Form<LoginModel>, mut cookies: Cookies) -> Result<Redirect,
         Ok(username) => {
             match model.password.as_ref() {
                 Ok(password) => {
-                    if username.as_str() == "magiclen" && password.as_str() == "12345678" {
+                    if username.0 == "magiclen" && password.0 == "12345678" {
                         let mut registered = RegisteredClaims::default();
                         registered.expiration = Some(
                             (SystemTime::now() + Duration::from_secs(10))
