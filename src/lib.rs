@@ -402,7 +402,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                             if authorization.starts_with("Bearer ") {
                                                 let token = &authorization[7..];
 
-                                                #name::verify_jwt_token(token) {
+                                                match #name::verify_jwt_token(token) {
                                                     Ok(o) => Some(o),
                                                     Err(_) => None
                                                 }
