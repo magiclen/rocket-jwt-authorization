@@ -375,7 +375,11 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                         let set_cookie_insecure = quote! {
                             #[inline]
                             pub fn set_cookie_insecure(&self, cookies: &mut ::rocket::http::Cookies) {
-                                cookies.add(::rocket::http::Cookie::new(unsafe {#expr}, self.get_jwt_token()));
+                                let mut cookie = ::rocket::http::Cookie::new(unsafe {#expr}, self.get_jwt_token());
+
+                                cookie.set_same_site(::rocket::http::SameSite::Strict);
+
+                                cookies.add(cookie);
                             }
                         };
 
