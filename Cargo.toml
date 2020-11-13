@@ -1,6 +1,6 @@
 [package]
 name = "rocket-jwt-authorization"
-version = "0.1.10"
+version = "0.1.11"
 authors = ["Magic Len <len@magiclen.org>"]
 edition = "2018"
 repository = "https://github.com/magiclen/rocket-jwt-authorization"
@@ -32,8 +32,8 @@ rocket-include-tera = "0.4.13"
 
 once_cell = "1"
 
-jwt = "0.10"
-hmac = "0.8"
+jwt = "0.11"
+hmac = "0.9"
 sha2 = "0.9"
 
 validators = "0.22"
