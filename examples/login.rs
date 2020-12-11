@@ -81,13 +81,15 @@ fn login_post(model: Form<LoginModel>, mut cookies: Cookies) -> Result<Redirect,
             match model.password.as_ref() {
                 Ok(password) => {
                     if username.0 == "magiclen" && password.0 == "12345678" {
-                        let mut registered = RegisteredClaims::default();
-                        registered.expiration = Some(
-                            (SystemTime::now() + Duration::from_secs(10))
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        );
+                        let registered = RegisteredClaims {
+                            expiration: Some(
+                                (SystemTime::now() + Duration::from_secs(10))
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs(),
+                            ),
+                            ..RegisteredClaims::default()
+                        };
 
                         let user_auth = UserAuth {
                             registered,
