@@ -347,7 +347,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                     {
                         let set_cookie = quote! {
                             #[inline]
-                            pub fn set_cookie(&self, cookies: &mut ::rocket::http::Cookies) {
+                            pub fn set_cookie(&self, cookies: &::rocket::http::CookieJar) {
                                 let mut cookie = ::rocket::http::Cookie::new(unsafe {#expr}, self.get_jwt_token());
 
                                 cookie.set_secure(true);
@@ -358,7 +358,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
 
                         let set_cookie_insecure = quote! {
                             #[inline]
-                            pub fn set_cookie_insecure(&self, cookies: &mut ::rocket::http::Cookies) {
+                            pub fn set_cookie_insecure(&self, cookies: &::rocket::http::CookieJar) {
                                 let mut cookie = ::rocket::http::Cookie::new(unsafe {#expr}, self.get_jwt_token());
 
                                 cookie.set_same_site(::rocket::http::SameSite::Strict);
@@ -369,7 +369,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
 
                         let remove_cookie = quote! {
                             #[inline]
-                            pub fn remove_cookie(cookies: &mut ::rocket::http::Cookies) {
+                            pub fn remove_cookie(cookies: &::rocket::http::CookieJar) {
                                 cookies.remove(::rocket::http::Cookie::named(unsafe {#expr}));
                             }
                         };
@@ -443,30 +443,32 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                         };
 
                         let from_request = quote! {
-                            impl<'a, 'r> ::rocket::request::FromRequest<'a, 'r> for #name {
+                            #[rocket::async_trait]
+                            impl<'r> ::rocket::request::FromRequest<'r> for #name {
                                 type Error = ();
 
-                                fn from_request(request: &'a ::rocket::request::Request<'r>) -> ::rocket::request::Outcome<Self, Self::Error> {
+                                async fn from_request(request: &'r ::rocket::request::Request<'_>) -> ::rocket::request::Outcome<Self, Self::Error> {
                                     match #from_request_body {
-                                        Some(o) => ::rocket::Outcome::Success(o),
-                                        None => ::rocket::Outcome::Forward(()),
+                                        Some(o) => ::rocket::outcome::Outcome::Success(o),
+                                        None => ::rocket::outcome::Outcome::Forward(()),
                                     }
                                 }
                             }
                         };
 
                         let from_request_cache = quote! {
-                            impl<'a, 'r> ::rocket::request::FromRequest<'a, 'r> for &'a #name {
+                            #[rocket::async_trait]
+                            impl<'r> ::rocket::request::FromRequest<'r> for &'r #name {
                                 type Error = ();
 
-                                fn from_request(request: &'a ::rocket::request::Request<'r>) -> ::rocket::request::Outcome<Self, Self::Error> {
+                                async fn from_request(request: &'r ::rocket::request::Request<'_>) -> ::rocket::request::Outcome<Self, Self::Error> {
                                     let cache = request.local_cache(|| {
                                         #from_request_body
                                     });
 
                                     match cache.as_ref() {
-                                        Some(o) => ::rocket::Outcome::Success(o),
-                                        None => ::rocket::Outcome::Forward(()),
+                                        Some(o) => ::rocket::outcome::Outcome::Success(o),
+                                        None => ::rocket::outcome::Outcome::Forward(()),
                                     }
                                 }
                             }

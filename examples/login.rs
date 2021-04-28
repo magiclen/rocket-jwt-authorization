@@ -1,5 +1,3 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-
 #[macro_use]
 extern crate rocket_include_tera;
 
@@ -30,15 +28,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jwt::RegisteredClaims;
 
-use rocket::http::Cookies;
-use rocket::request::Form;
+use rocket::form::{self, Form};
+use rocket::http::CookieJar;
 use rocket::response::Redirect;
 use rocket::State;
 
-use rocket_include_tera::{TeraContextManager, TeraResponse};
+use rocket_include_tera::{EtagIfNoneMatch, TeraContextManager, TeraResponse};
 
 use validators::prelude::*;
-use validators::RegexError;
 use validators_prelude::regex::Regex;
 
 use once_cell::sync::Lazy;
@@ -57,9 +54,9 @@ pub struct Username(String);
 pub struct Password(String);
 
 #[derive(Debug, FromForm)]
-struct LoginModel {
-    username: Result<Username, RegexError>,
-    password: Result<Password, RegexError>,
+struct LoginModel<'v> {
+    username: form::Result<'v, Username>,
+    password: form::Result<'v, Password>,
 }
 
 #[derive(Serialize, Deserialize, JWT)]
@@ -71,10 +68,15 @@ pub struct UserAuth {
 }
 
 #[post("/login", data = "<model>")]
-fn login_post(model: Form<LoginModel>, mut cookies: Cookies) -> Result<Redirect, TeraResponse> {
+fn login_post(
+    cm: State<TeraContextManager>,
+    etag_if_none_match: &EtagIfNoneMatch,
+    model: Form<LoginModel>,
+    cookies: &CookieJar,
+) -> Result<Redirect, TeraResponse> {
     let mut map = HashMap::new();
 
-    UserAuth::remove_cookie(&mut cookies);
+    UserAuth::remove_cookie(cookies);
 
     match model.username.as_ref() {
         Ok(username) => {
@@ -96,7 +98,7 @@ fn login_post(model: Form<LoginModel>, mut cookies: Cookies) -> Result<Redirect,
                             id: 1,
                         };
 
-                        user_auth.set_cookie(&mut cookies);
+                        user_auth.set_cookie(cookies);
 
                         map.insert(
                             "message",
@@ -116,20 +118,20 @@ fn login_post(model: Form<LoginModel>, mut cookies: Cookies) -> Result<Redirect,
         }
     }
 
-    Err(tera_response!("login", &map))
+    Err(tera_response!(cm, etag_if_none_match, "login", &map))
 }
 
 #[get("/login")]
-fn login_get(cm: State<TeraContextManager>) -> TeraResponse {
-    tera_response_cache!(cm, "login", {
+fn login_get(cm: State<TeraContextManager>, etag_if_none_match: &EtagIfNoneMatch) -> TeraResponse {
+    tera_response_cache!(cm, etag_if_none_match, "login", {
         println!("Generate login and cache it...");
 
-        tera_response!("login")
+        tera_response!(cm, EtagIfNoneMatch::default(), "login")
     })
 }
 
 #[get("/")]
-fn index(user_auth: Option<UserAuth>, mut cookies: Cookies) -> Result<String, Redirect> {
+fn index(user_auth: Option<UserAuth>, mut cookies: &CookieJar) -> Result<String, Redirect> {
     match user_auth {
         Some(user_auth) => {
             if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -146,12 +148,10 @@ fn index(user_auth: Option<UserAuth>, mut cookies: Cookies) -> Result<String, Re
     }
 }
 
-fn main() {
-    rocket::ignite()
-        .attach(TeraResponse::fairing(|tera| {
-            tera_resources_initialize!(tera, "login", "examples/views/login.tera",);
-        }))
+#[launch]
+fn rocket() -> _ {
+    rocket::build()
+        .attach(tera_resources_initializer!("login" => "examples/views/login.tera"))
         .mount("/", routes![index])
         .mount("/", routes![login_get, login_post])
-        .launch();
 }

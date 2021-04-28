@@ -1,7 +1,7 @@
 `jwt-authorization` Request Guard for Rocket Framework
 ====================
 
-[![Build Status](https://travis-ci.org/magiclen/rocket-jwt-authorization.svg?branch=master)](https://travis-ci.org/magiclen/rocket-jwt-authorization)
+[![CI](https://github.com/magiclen/rocket-jwt-authorization/actions/workflows/ci.yml/badge.svg)](https://github.com/magiclen/rocket-jwt-authorization/actions/workflows/ci.yml)
 
 This crate provides a procedural macro to create request guards used for authorization.
 
