@@ -131,13 +131,13 @@ fn login_get(cm: State<TeraContextManager>, etag_if_none_match: &EtagIfNoneMatch
 }
 
 #[get("/")]
-fn index(user_auth: Option<UserAuth>, mut cookies: &CookieJar) -> Result<String, Redirect> {
+fn index(user_auth: Option<UserAuth>, cookies: &CookieJar) -> Result<String, Redirect> {
     match user_auth {
         Some(user_auth) => {
             if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
                 > user_auth.registered.expiration.unwrap()
             {
-                UserAuth::remove_cookie(&mut cookies);
+                UserAuth::remove_cookie(cookies);
 
                 Ok(String::from("Login token expired, please log in again!"))
             } else {

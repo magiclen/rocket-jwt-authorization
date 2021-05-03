@@ -404,7 +404,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                             match #name::verify_jwt_token(token.value()) {
                                                 Ok(o) => Some(o),
                                                 Err(_) => {
-                                                    #name::remove_cookie(&mut request.cookies());
+                                                    #name::remove_cookie(&request.cookies());
 
                                                     None
                                                 }
