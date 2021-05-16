@@ -69,7 +69,7 @@ pub struct UserAuth {
 
 #[post("/login", data = "<model>")]
 fn login_post(
-    cm: State<TeraContextManager>,
+    cm: &State<TeraContextManager>,
     etag_if_none_match: &EtagIfNoneMatch,
     model: Form<LoginModel>,
     cookies: &CookieJar,
@@ -122,7 +122,7 @@ fn login_post(
 }
 
 #[get("/login")]
-fn login_get(cm: State<TeraContextManager>, etag_if_none_match: &EtagIfNoneMatch) -> TeraResponse {
+fn login_get(cm: &State<TeraContextManager>, etag_if_none_match: &EtagIfNoneMatch) -> TeraResponse {
     tera_response_cache!(cm, etag_if_none_match, "login", {
         println!("Generate login and cache it...");
 
