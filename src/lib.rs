@@ -310,7 +310,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                 START.call_once(|| {
                                     use ::hmac::{Hmac, NewMac};
 
-                                    HMAC = Some(Hmac::new_varkey(unsafe {#key}.as_ref()).unwrap())
+                                    HMAC = Some(Hmac::new_from_slice(unsafe {#key}.as_ref()).unwrap())
                                 });
 
                                 HMAC.as_ref().unwrap()
