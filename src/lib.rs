@@ -414,8 +414,8 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                 }
                                 Source::Query(expr) => {
                                     quote! {
-                                        else if let Some(token) = request.get_query_value(unsafe {#expr}) {
-                                            let token: &::rocket::http::RawStr = token.unwrap();
+                                        else if let Some(token) = request.query_value(unsafe {#expr}) {
+                                            let token: &str = token.unwrap();
 
                                             match #name::verify_jwt_token(token) {
                                                 Ok(o) => Some(o),

@@ -60,7 +60,7 @@ struct LoginModel<'v> {
 }
 
 #[derive(Serialize, Deserialize, JWT)]
-#[jwt(SECRET_KEY, sha2::Sha256, Cookie = "access_token", Query = "access_token")]
+#[jwt(SECRET_KEY, sha2::Sha256, Cookie = "access_token", Header, Query = "access_token")]
 pub struct UserAuth {
     #[serde(flatten)]
     registered: RegisteredClaims,
