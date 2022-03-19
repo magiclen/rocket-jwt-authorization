@@ -27,9 +27,9 @@ rocket-include-tera = "0.5"
 
 once_cell = "1"
 
-jwt = "0.14"
-hmac = "0.11"
-sha2 = "0.9"
+jwt = "0.16"
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies.validators]
 version = "0.24"
