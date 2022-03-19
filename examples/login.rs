@@ -2,26 +2,10 @@
 extern crate rocket_include_tera;
 
 #[macro_use]
-extern crate validators_derive;
-
-extern crate validators;
-
-extern crate once_cell;
-
-#[macro_use]
 extern crate rocket;
 
 #[macro_use]
 extern crate rocket_jwt_authorization;
-
-extern crate serde;
-
-#[macro_use]
-extern crate serde_derive;
-
-extern crate hmac;
-extern crate jwt;
-extern crate sha2;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -37,6 +21,8 @@ use rocket_include_tera::{EtagIfNoneMatch, TeraContextManager, TeraResponse};
 
 use validators::prelude::*;
 use validators_prelude::regex::Regex;
+
+use serde::{Deserialize, Serialize};
 
 use once_cell::sync::Lazy;
 

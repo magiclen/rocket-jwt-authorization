@@ -6,16 +6,10 @@ This crate provides a procedural macro to create request guards used for authori
 See `examples`.
 */
 
-extern crate proc_macro;
-
-extern crate syn;
-
-#[macro_use]
-extern crate quote;
-
 mod panic;
 
 use proc_macro::TokenStream;
+use quote::quote;
 use syn::{DeriveInput, Expr, ExprLit, ExprPath, Lit, Meta, NestedMeta, Path};
 
 enum Source {
