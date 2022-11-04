@@ -48,13 +48,7 @@ impl Source {
     fn search<S: AsRef<str>>(sources: &[Source], name: S) -> Option<&Source> {
         let name = name.as_ref();
 
-        for source in sources {
-            if source.as_str() == name {
-                return Some(source);
-            }
-        }
-
-        None
+        sources.iter().find(|source| source.as_str() == name)
     }
 
     #[inline]

@@ -116,6 +116,7 @@ fn login_get(cm: &State<TeraContextManager>, etag_if_none_match: &EtagIfNoneMatc
     })
 }
 
+#[allow(clippy::result_large_err)] // TODO should use `Box` after a newer Rocket is released
 #[get("/")]
 fn index(user_auth: Option<UserAuth>, cookies: &CookieJar) -> Result<String, Redirect> {
     match user_auth {
