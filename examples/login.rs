@@ -7,24 +7,23 @@ extern crate rocket;
 #[macro_use]
 extern crate rocket_jwt_authorization;
 
-use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use jwt::RegisteredClaims;
-
-use rocket::form::{self, Form};
-use rocket::http::CookieJar;
-use rocket::response::Redirect;
-use rocket::State;
-
+use once_cell::sync::Lazy;
+use rocket::{
+    form::{self, Form},
+    http::CookieJar,
+    response::Redirect,
+    State,
+};
 use rocket_include_tera::{EtagIfNoneMatch, TeraContextManager, TeraResponse};
-
+use serde::{Deserialize, Serialize};
 use validators::prelude::*;
 use validators_prelude::regex::Regex;
-
-use serde::{Deserialize, Serialize};
-
-use once_cell::sync::Lazy;
 
 static SECRET_KEY: &str = "cc818bd5-6d16-4a67-b109-43d22d252f88";
 
@@ -50,7 +49,7 @@ struct LoginModel<'v> {
 pub struct UserAuth {
     #[serde(flatten)]
     registered: RegisteredClaims,
-    id: i32,
+    id:         i32,
 }
 
 #[post("/login", data = "<model>")]
@@ -65,43 +64,42 @@ fn login_post(
     UserAuth::remove_cookie(cookies);
 
     match model.username.as_ref() {
-        Ok(username) => {
-            match model.password.as_ref() {
-                Ok(password) => {
-                    if username.0 == "magiclen" && password.0 == "12345678" {
-                        let registered = RegisteredClaims {
-                            expiration: Some(
-                                (SystemTime::now() + Duration::from_secs(10))
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
-                            ),
-                            ..RegisteredClaims::default()
-                        };
+        Ok(username) => match model.password.as_ref() {
+            Ok(password) => {
+                if username.0 == "magiclen" && password.0 == "12345678" {
+                    let registered = RegisteredClaims {
+                        expiration: Some(
+                            (SystemTime::now() + Duration::from_secs(10))
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        ),
+                        ..RegisteredClaims::default()
+                    };
 
-                        let user_auth = UserAuth {
-                            registered,
-                            id: 1,
-                        };
+                    let user_auth = UserAuth {
+                        registered,
+                        id: 1,
+                    };
 
-                        user_auth.set_cookie(cookies);
+                    user_auth.set_cookie(cookies);
 
-                        map.insert(
-                            "message",
-                            "Login successfully, a cookie has been written. Open home page to see the result.",
-                        );
-                    } else {
-                        map.insert("message", "Invalid username or password.");
-                    }
+                    map.insert(
+                        "message",
+                        "Login successfully, a cookie has been written. Open home page to see the \
+                         result.",
+                    );
+                } else {
+                    map.insert("message", "Invalid username or password.");
                 }
-                Err(_) => {
-                    map.insert("message", "The format of your password is incorrect.");
-                }
-            }
-        }
+            },
+            Err(_) => {
+                map.insert("message", "The format of your password is incorrect.");
+            },
+        },
         Err(_) => {
             map.insert("message", "The format of your username is incorrect.");
-        }
+        },
     }
 
     Err(tera_response!(cm, etag_if_none_match, "login", &map))
@@ -130,7 +128,7 @@ fn index(user_auth: Option<UserAuth>, cookies: &CookieJar) -> Result<String, Red
             } else {
                 Ok(format!("Logged in user id = {}", user_auth.id))
             }
-        }
+        },
         None => Err(Redirect::temporary(uri!(login_get))),
     }
 }

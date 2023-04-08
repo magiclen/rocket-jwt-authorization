@@ -82,120 +82,99 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                     let mut iter = list.nested.into_iter();
 
                     let key: Expr = match iter.next() {
-                        Some(p) => {
-                            match p {
-                                NestedMeta::Lit(l) => {
-                                    match l {
-                                        Lit::Str(s) => {
-                                            Expr::Lit(ExprLit {
-                                                attrs: Vec::new(),
-                                                lit: Lit::Str(s),
-                                            })
-                                        }
-                                        _ => {
-                                            panic::attribute_incorrect_format(
-                                                "jwt",
-                                                correct_usage_for_jwt_attribute,
-                                            )
-                                        }
-                                    }
-                                }
-                                NestedMeta::Meta(m) => {
-                                    match m {
-                                        Meta::Path(p) => {
-                                            Expr::Path(ExprPath {
-                                                attrs: Vec::new(),
-                                                qself: None,
-                                                path: p,
-                                            })
-                                        }
-                                        _ => {
-                                            panic::attribute_incorrect_format(
-                                                "jwt",
-                                                correct_usage_for_jwt_attribute,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            panic::attribute_incorrect_format(
-                                "jwt",
-                                correct_usage_for_jwt_attribute,
-                            )
-                        }
+                        Some(p) => match p {
+                            NestedMeta::Lit(l) => match l {
+                                Lit::Str(s) => Expr::Lit(ExprLit {
+                                    attrs: Vec::new(),
+                                    lit:   Lit::Str(s),
+                                }),
+                                _ => panic::attribute_incorrect_format(
+                                    "jwt",
+                                    correct_usage_for_jwt_attribute,
+                                ),
+                            },
+                            NestedMeta::Meta(m) => match m {
+                                Meta::Path(p) => Expr::Path(ExprPath {
+                                    attrs: Vec::new(),
+                                    qself: None,
+                                    path:  p,
+                                }),
+                                _ => panic::attribute_incorrect_format(
+                                    "jwt",
+                                    correct_usage_for_jwt_attribute,
+                                ),
+                            },
+                        },
+                        None => panic::attribute_incorrect_format(
+                            "jwt",
+                            correct_usage_for_jwt_attribute,
+                        ),
                     };
 
                     let (algorithm, sources): (Path, Vec<Source>) = match iter.next() {
-                        Some(p) => {
-                            match p {
-                                NestedMeta::Meta(Meta::Path(p)) => {
-                                    let mut sources = Vec::new();
+                        Some(p) => match p {
+                            NestedMeta::Meta(Meta::Path(p)) => {
+                                let mut sources = Vec::new();
 
-                                    for p in iter {
-                                        match p {
-                                            NestedMeta::Meta(m) => {
-                                                let attr_name = match m.path().get_ident() {
-                                                    Some(ident) => {
-                                                        ident.to_string().to_ascii_lowercase()
-                                                    }
-                                                    None => {
+                                for p in iter {
+                                    match p {
+                                        NestedMeta::Meta(m) => {
+                                            let attr_name = match m.path().get_ident() {
+                                                Some(ident) => {
+                                                    ident.to_string().to_ascii_lowercase()
+                                                },
+                                                None => {
+                                                    panic::attribute_incorrect_format(
+                                                        "jwt",
+                                                        correct_usage_for_jwt_attribute,
+                                                    );
+                                                },
+                                            };
+
+                                            if Source::search(&sources, attr_name.as_str())
+                                                .is_some()
+                                            {
+                                                panic::duplicated_source(attr_name.as_str());
+                                            }
+
+                                            match m {
+                                                Meta::Path(_) => {
+                                                    if attr_name.eq_ignore_ascii_case("header") {
+                                                        sources.push(Source::Header);
+                                                    } else {
                                                         panic::attribute_incorrect_format(
                                                             "jwt",
                                                             correct_usage_for_jwt_attribute,
                                                         );
                                                     }
-                                                };
+                                                },
+                                                Meta::NameValue(v) => match v.lit {
+                                                    Lit::Str(s) => {
+                                                        let expr = Box::new(Expr::Lit(ExprLit {
+                                                            attrs: Vec::new(),
+                                                            lit:   Lit::Str(s),
+                                                        }));
 
-                                                if Source::search(&sources, attr_name.as_str())
-                                                    .is_some()
-                                                {
-                                                    panic::duplicated_source(attr_name.as_str());
-                                                }
-
-                                                match m {
-                                                    Meta::Path(_) => {
-                                                        if attr_name.eq_ignore_ascii_case("header")
-                                                        {
-                                                            sources.push(Source::Header);
-                                                        } else {
-                                                            panic::attribute_incorrect_format(
-                                                                "jwt",
-                                                                correct_usage_for_jwt_attribute,
-                                                            );
-                                                        }
-                                                    }
-                                                    Meta::NameValue(v) => {
-                                                        match v.lit {
-                                                            Lit::Str(s) => {
-                                                                let expr =
-                                                                    Box::new(Expr::Lit(ExprLit {
-                                                                        attrs: Vec::new(),
-                                                                        lit: Lit::Str(s),
-                                                                    }));
-
-                                                                match Source::from(attr_name, expr) {
-                                                                Some(source) => sources.push(source),
-                                                                None => panic::attribute_incorrect_format(
-                                                                    "jwt",
-                                                                    correct_usage_for_jwt_attribute,
-                                                                )
-                                                            }
-                                                            }
-                                                            _ => {
+                                                        match Source::from(attr_name, expr) {
+                                                            Some(source) => sources.push(source),
+                                                            None => {
                                                                 panic::attribute_incorrect_format(
                                                                     "jwt",
                                                                     correct_usage_for_jwt_attribute,
                                                                 )
-                                                            }
+                                                            },
                                                         }
-                                                    }
-                                                    Meta::List(list) => {
-                                                        let mut iter = list.nested.into_iter();
+                                                    },
+                                                    _ => panic::attribute_incorrect_format(
+                                                        "jwt",
+                                                        correct_usage_for_jwt_attribute,
+                                                    ),
+                                                },
+                                                Meta::List(list) => {
+                                                    let mut iter = list.nested.into_iter();
 
-                                                        if let Some(p) = iter.next() {
-                                                            match p {
+                                                    if let Some(p) = iter.next() {
+                                                        match p {
                                                                 NestedMeta::Meta(m) => {
                                                                     match m {
                                                                         Meta::Path(path) => {
@@ -248,41 +227,36 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                                                     }
                                                                 }
                                                             }
-                                                        } else {
-                                                            panic::attribute_incorrect_format(
-                                                                "jwt",
-                                                                correct_usage_for_jwt_attribute,
-                                                            );
-                                                        }
+                                                    } else {
+                                                        panic::attribute_incorrect_format(
+                                                            "jwt",
+                                                            correct_usage_for_jwt_attribute,
+                                                        );
                                                     }
-                                                }
+                                                },
                                             }
-                                            _ => {
-                                                panic::attribute_incorrect_format(
-                                                    "jwt",
-                                                    correct_usage_for_jwt_attribute,
-                                                )
-                                            }
-                                        }
+                                        },
+                                        _ => panic::attribute_incorrect_format(
+                                            "jwt",
+                                            correct_usage_for_jwt_attribute,
+                                        ),
                                     }
-
-                                    if sources.is_empty() {
-                                        sources.push(Source::Header);
-                                    }
-
-                                    (p, sources)
                                 }
-                                _ => {
-                                    panic::attribute_incorrect_format(
-                                        "jwt",
-                                        correct_usage_for_jwt_attribute,
-                                    )
+
+                                if sources.is_empty() {
+                                    sources.push(Source::Header);
                                 }
-                            }
-                        }
+
+                                (p, sources)
+                            },
+                            _ => panic::attribute_incorrect_format(
+                                "jwt",
+                                correct_usage_for_jwt_attribute,
+                            ),
+                        },
                         None => {
                             (syn::parse2(quote!(::sha2::Sha256)).unwrap(), vec![Source::Header])
-                        }
+                        },
                     };
 
                     let name = &ast.ident;
@@ -386,7 +360,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                             }
                                         }
                                     }
-                                }
+                                },
                                 Source::Cookie(expr) => {
                                     quote! {
                                         else if let Some(token) = request.cookies().get(unsafe {#expr}) {
@@ -400,7 +374,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                             }
                                         }
                                     }
-                                }
+                                },
                                 Source::Query(expr) => {
                                     quote! {
                                         else if let Some(token) = request.query_value(unsafe {#expr}) {
@@ -412,7 +386,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                             }
                                         }
                                     }
-                                }
+                                },
                                 _ => unimplemented!(),
                             };
 
