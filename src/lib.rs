@@ -10,15 +10,27 @@ mod panic;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Expr, ExprLit, ExprPath, Lit, Meta, NestedMeta, Path};
+use syn::{
+    parse::{Parse, ParseStream},
+    DeriveInput, Expr, Lit, Meta, Path, Token,
+};
+
+const CORRECT_USAGE_FOR_JWT_ATTRIBUTE: &[&str] = &[
+    "#[jwt(\"key\")]",
+    "#[jwt(PATH)]",
+    "#[jwt(\"key\", sha2::Sha512)]",
+    "#[jwt(PATH, sha2::Sha512)]",
+    "#[jwt(PATH, sha2::Sha512, Header)]",
+    "#[jwt(PATH, sha2::Sha512, Cookie(\"access_token\"), Header, Query(PATH))]",
+];
 
 enum Source {
     Header,
-    Cookie(Box<Expr>),
-    Query(Box<Expr>),
+    Cookie(Expr),
+    Query(Expr),
     // TODO currently it's hard to be implemented, just ignore it
     #[allow(dead_code)]
-    Body(Box<Expr>),
+    Body(Expr),
 }
 
 impl Source {
@@ -33,7 +45,7 @@ impl Source {
     }
 
     #[inline]
-    fn from<S: AsRef<str>>(name: S, expr: Box<Expr>) -> Option<Source> {
+    fn from<S: AsRef<str>>(name: S, expr: Expr) -> Option<Source> {
         let name = name.as_ref();
 
         match name {
@@ -55,7 +67,7 @@ impl Source {
     fn search_cookie_get_expr(sources: &[Source]) -> Option<&Expr> {
         for source in sources.iter() {
             if let Source::Cookie(expr) = source {
-                return Some(expr.as_ref());
+                return Some(expr);
             }
         }
 
@@ -63,201 +75,156 @@ impl Source {
     }
 }
 
-fn derive_input_handler(ast: DeriveInput) -> TokenStream {
-    let correct_usage_for_jwt_attribute = &[
-        "#[jwt(\"key\")]",
-        "#[jwt(PATH)]",
-        "#[jwt(\"key\", sha2::Sha512)]",
-        "#[jwt(PATH, sha2::Sha512)]",
-        "#[jwt(PATH, sha2::Sha512, Header)]",
-        "#[jwt(PATH, sha2::Sha512, Cookie(\"access_token\"), Header, Query(PATH))]",
-    ];
+struct Parser2 {
+    expr: Expr,
+}
 
-    for attr in ast.attrs.iter() {
-        if let Some(attr_meta_name) = attr.path.get_ident() {
-            if attr_meta_name == "jwt" {
-                let attr_meta = attr.parse_meta().unwrap();
+impl Parse for Parser2 {
+    #[inline]
+    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
+        match input.parse::<Expr>() {
+            Ok(expr) => {
+                let pass = match &expr {
+                    Expr::Path(_) => true,
+                    Expr::Lit(lit) => matches!(lit.lit, Lit::Str(_)),
+                    _ => false,
+                };
 
-                if let Meta::List(list) = attr_meta {
-                    let mut iter = list.nested.into_iter();
+                if !pass {
+                    panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE);
+                }
 
-                    let key: Expr = match iter.next() {
-                        Some(p) => match p {
-                            NestedMeta::Lit(l) => match l {
-                                Lit::Str(s) => Expr::Lit(ExprLit {
-                                    attrs: Vec::new(),
-                                    lit:   Lit::Str(s),
-                                }),
-                                _ => panic::attribute_incorrect_format(
-                                    "jwt",
-                                    correct_usage_for_jwt_attribute,
-                                ),
-                            },
-                            NestedMeta::Meta(m) => match m {
-                                Meta::Path(p) => Expr::Path(ExprPath {
-                                    attrs: Vec::new(),
-                                    qself: None,
-                                    path:  p,
-                                }),
-                                _ => panic::attribute_incorrect_format(
-                                    "jwt",
-                                    correct_usage_for_jwt_attribute,
-                                ),
-                            },
-                        },
-                        None => panic::attribute_incorrect_format(
-                            "jwt",
-                            correct_usage_for_jwt_attribute,
-                        ),
-                    };
+                Ok(Parser2 {
+                    expr,
+                })
+            },
+            _ => panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE),
+        }
+    }
+}
 
-                    let (algorithm, sources): (Path, Vec<Source>) = match iter.next() {
-                        Some(p) => match p {
-                            NestedMeta::Meta(Meta::Path(p)) => {
-                                let mut sources = Vec::new();
+struct Parser {
+    key:       Expr,
+    algorithm: Path,
+    sources:   Vec<Source>,
+}
 
-                                for p in iter {
-                                    match p {
-                                        NestedMeta::Meta(m) => {
-                                            let attr_name = match m.path().get_ident() {
-                                                Some(ident) => {
-                                                    ident.to_string().to_ascii_lowercase()
-                                                },
-                                                None => {
-                                                    panic::attribute_incorrect_format(
-                                                        "jwt",
-                                                        correct_usage_for_jwt_attribute,
-                                                    );
-                                                },
-                                            };
+impl Parse for Parser {
+    #[inline]
+    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
+        let key = input.parse::<Parser2>()?.expr;
 
-                                            if Source::search(&sources, attr_name.as_str())
-                                                .is_some()
-                                            {
-                                                panic::duplicated_source(attr_name.as_str());
-                                            }
+        let (algorithm, sources): (Path, Vec<Source>) = {
+            if input.is_empty() {
+                (syn::parse2(quote!(::sha2::Sha256))?, vec![Source::Header])
+            } else {
+                input.parse::<Token!(,)>()?;
 
-                                            match m {
-                                                Meta::Path(_) => {
-                                                    if attr_name.eq_ignore_ascii_case("header") {
-                                                        sources.push(Source::Header);
-                                                    } else {
-                                                        panic::attribute_incorrect_format(
-                                                            "jwt",
-                                                            correct_usage_for_jwt_attribute,
-                                                        );
-                                                    }
-                                                },
-                                                Meta::NameValue(v) => match v.lit {
-                                                    Lit::Str(s) => {
-                                                        let expr = Box::new(Expr::Lit(ExprLit {
-                                                            attrs: Vec::new(),
-                                                            lit:   Lit::Str(s),
-                                                        }));
+                match input.parse::<Path>() {
+                    Ok(p) => {
+                        let mut sources = Vec::new();
 
-                                                        match Source::from(attr_name, expr) {
-                                                            Some(source) => sources.push(source),
-                                                            None => {
-                                                                panic::attribute_incorrect_format(
-                                                                    "jwt",
-                                                                    correct_usage_for_jwt_attribute,
-                                                                )
-                                                            },
-                                                        }
-                                                    },
-                                                    _ => panic::attribute_incorrect_format(
-                                                        "jwt",
-                                                        correct_usage_for_jwt_attribute,
-                                                    ),
-                                                },
-                                                Meta::List(list) => {
-                                                    let mut iter = list.nested.into_iter();
+                        while !input.is_empty() {
+                            input.parse::<Token!(,)>()?;
 
-                                                    if let Some(p) = iter.next() {
-                                                        match p {
-                                                                NestedMeta::Meta(m) => {
-                                                                    match m {
-                                                                        Meta::Path(path) => {
-                                                                            let expr =
-                                                                                Box::new(Expr::Path(ExprPath {
-                                                                                    attrs: Vec::new(),
-                                                                                    qself: None,
-                                                                                    path,
-                                                                                }));
+                            let m = input.parse::<Meta>()?;
 
-                                                                            match Source::from(attr_name, expr) {
-                                                                                Some(source) => sources.push(source),
-                                                                                None => panic::attribute_incorrect_format(
-                                                                                    "jwt",
-                                                                                    correct_usage_for_jwt_attribute,
-                                                                                )
-                                                                            }
-                                                                        }
-                                                                        _ => {
-                                                                            panic::attribute_incorrect_format(
-                                                                                "jwt",
-                                                                                correct_usage_for_jwt_attribute,
-                                                                            )
-                                                                        }
-                                                                    }
-                                                                }
-                                                                NestedMeta::Lit(l) => {
-                                                                    match l {
-                                                                        Lit::Str(s) => {
-                                                                            let expr =
-                                                                                Box::new(Expr::Lit(ExprLit {
-                                                                                    attrs: Vec::new(),
-                                                                                    lit: Lit::Str(s),
-                                                                                }));
+                            let attr_name = match m.path().get_ident() {
+                                Some(ident) => ident.to_string().to_ascii_lowercase(),
+                                None => {
+                                    panic::attribute_incorrect_format(
+                                        "jwt",
+                                        CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
+                                    );
+                                },
+                            };
 
-                                                                            match Source::from(attr_name, expr) {
-                                                                                Some(source) => sources.push(source),
-                                                                                None => panic::attribute_incorrect_format(
-                                                                                    "jwt",
-                                                                                    correct_usage_for_jwt_attribute,
-                                                                                )
-                                                                            }
-                                                                        }
-                                                                        _ => {
-                                                                            panic::attribute_incorrect_format(
-                                                                                "jwt",
-                                                                                correct_usage_for_jwt_attribute,
-                                                                            )
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                    } else {
-                                                        panic::attribute_incorrect_format(
-                                                            "jwt",
-                                                            correct_usage_for_jwt_attribute,
-                                                        );
-                                                    }
-                                                },
-                                            }
-                                        },
-                                        _ => panic::attribute_incorrect_format(
+                            if Source::search(&sources, attr_name.as_str()).is_some() {
+                                panic::duplicated_source(attr_name.as_str());
+                            }
+
+                            match m {
+                                Meta::Path(_) => {
+                                    if attr_name.eq_ignore_ascii_case("header") {
+                                        sources.push(Source::Header);
+                                    } else {
+                                        panic::attribute_incorrect_format(
                                             "jwt",
-                                            correct_usage_for_jwt_attribute,
+                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
+                                        );
+                                    }
+                                },
+                                Meta::NameValue(v) => {
+                                    let expr = v.value;
+
+                                    let pass = match &expr {
+                                        Expr::Path(_) => true,
+                                        Expr::Lit(lit) => matches!(lit.lit, Lit::Str(_)),
+                                        _ => false,
+                                    };
+
+                                    if !pass {
+                                        panic::attribute_incorrect_format(
+                                            "jwt",
+                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
+                                        );
+                                    }
+
+                                    match Source::from(attr_name, expr) {
+                                        Some(source) => sources.push(source),
+                                        None => panic::attribute_incorrect_format(
+                                            "jwt",
+                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
                                         ),
                                     }
-                                }
+                                },
+                                Meta::List(list) => {
+                                    let parsed: Parser2 = list.parse_args()?;
 
-                                if sources.is_empty() {
-                                    sources.push(Source::Header);
-                                }
+                                    let expr = parsed.expr;
 
-                                (p, sources)
-                            },
-                            _ => panic::attribute_incorrect_format(
-                                "jwt",
-                                correct_usage_for_jwt_attribute,
-                            ),
-                        },
-                        None => {
-                            (syn::parse2(quote!(::sha2::Sha256)).unwrap(), vec![Source::Header])
-                        },
-                    };
+                                    match Source::from(attr_name, expr) {
+                                        Some(source) => sources.push(source),
+                                        None => panic::attribute_incorrect_format(
+                                            "jwt",
+                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
+                                        ),
+                                    }
+                                },
+                            }
+                        }
+
+                        if sources.is_empty() {
+                            sources.push(Source::Header);
+                        }
+
+                        (p, sources)
+                    },
+                    Err(_) => {
+                        panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE)
+                    },
+                }
+            }
+        };
+
+        Ok(Parser {
+            key,
+            algorithm,
+            sources,
+        })
+    }
+}
+
+fn derive_input_handler(ast: DeriveInput) -> TokenStream {
+    for attr in ast.attrs {
+        if attr.path().is_ident("jwt") {
+            match attr.meta {
+                Meta::List(list) => {
+                    let parsed: Parser = list.parse_args().unwrap();
+
+                    let algorithm = parsed.algorithm;
+                    let key = parsed.key;
+                    let sources = parsed.sources;
 
                     let name = &ast.ident;
                     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
@@ -461,9 +428,8 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                     };
 
                     return jwt_impl.into();
-                } else {
-                    panic::attribute_incorrect_format("jwt", correct_usage_for_jwt_attribute);
-                }
+                },
+                _ => panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE),
             }
         }
     }
