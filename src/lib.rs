@@ -380,7 +380,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
                                 async fn from_request(request: &'r ::rocket::request::Request<'_>) -> ::rocket::request::Outcome<Self, Self::Error> {
                                     match #from_request_body {
                                         Some(o) => ::rocket::outcome::Outcome::Success(o),
-                                        None => ::rocket::outcome::Outcome::Forward(()),
+                                        None => ::rocket::outcome::Outcome::Forward(::rocket::http::Status::Unauthorized),
                                     }
                                 }
                             }
@@ -398,7 +398,7 @@ fn derive_input_handler(ast: DeriveInput) -> TokenStream {
 
                                     match cache.as_ref() {
                                         Some(o) => ::rocket::outcome::Outcome::Success(o),
-                                        None => ::rocket::outcome::Outcome::Forward(()),
+                                        None => ::rocket::outcome::Outcome::Forward(::rocket::http::Status::Unauthorized),
                                     }
                                 }
                             }
