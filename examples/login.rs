@@ -31,11 +31,11 @@ static RE_USERNAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w{1,30}$").unwrap(
 static RE_PASSWORD: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[\S ]{8,}$").unwrap());
 
 #[derive(Debug, Clone, Validator)]
-#[validator(regex(RE_USERNAME))]
+#[validator(regex(regex = RE_USERNAME))]
 pub struct Username(String);
 
 #[derive(Debug, Clone, Validator)]
-#[validator(regex(RE_PASSWORD))]
+#[validator(regex(regex = RE_PASSWORD))]
 pub struct Password(String);
 
 #[derive(Debug, FromForm)]
