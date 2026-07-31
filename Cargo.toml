@@ -1,6 +1,6 @@
 [package]
 name = "rocket-jwt-authorization"
-version = "0.2.11"
+version = "0.3.0"
 authors = ["Magic Len <len@magiclen.org>"]
 edition = "2024"
 rust-version = "1.88"
@@ -12,21 +12,30 @@ description = "This crate provides a procedural macro to create request guards u
 license = "MIT"
 include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 
-[lib]
-proc-macro = true
-
 [dependencies]
-syn = "3"
-quote = "1.0.35"
+rocket-jwt-authorization-derive = { version = "0.3", path = "rocket-jwt-authorization-derive" }
+
+jsonwebtoken = { version = "11", default-features = false }
+rocket = "0.5.1"
+serde = "1"
+serde_json = "1"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 
-rocket = "0.5"
 rocket-include-tera = "0.6"
 
-jwt = "0.16"
-hmac = "0.12"
-sha2 = "0.10"
-
 validators = { version = "0.26", default-features = false, features = ["derive", "rocket", "regex"] }
+
+[features]
+default = ["rust_crypto", "use_pem"]
+
+# Pure Rust cryptography. Exactly one of `rust_crypto` and `aws_lc_rs` needs to be enabled.
+rust_crypto = ["jsonwebtoken/rust_crypto"]
+# Cryptography backed by AWS-LC. Needs `default-features = false` to not enable `rust_crypto` as well.
+aws_lc_rs = ["jsonwebtoken/aws_lc_rs"]
+# Support for reading keys in the PEM format.
+use_pem = ["jsonwebtoken/use_pem"]
+
+[workspace]
+members = ["rocket-jwt-authorization-derive"]

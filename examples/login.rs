@@ -4,16 +4,12 @@ extern crate rocket_include_tera;
 #[macro_use]
 extern crate rocket;
 
-#[macro_use]
-extern crate rocket_jwt_authorization;
-
 use std::{
     collections::HashMap,
     sync::LazyLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use jwt::RegisteredClaims;
 use rocket::{
     State,
     form::{self, Form},
@@ -21,6 +17,7 @@ use rocket::{
     response::Redirect,
 };
 use rocket_include_tera::{EtagIfNoneMatch, TeraContextManager, TeraResponse};
+use rocket_jwt_authorization::prelude::*;
 use serde::{Deserialize, Serialize};
 use validators::prelude::*;
 use validators_prelude::regex::Regex;
@@ -45,11 +42,10 @@ struct LoginModel<'v> {
 }
 
 #[derive(Serialize, Deserialize, JWT)]
-#[jwt(SECRET_KEY, sha2::Sha256, Cookie = "access_token", Header, Query = "access_token")]
+#[jwt(key = SECRET_KEY, cookie = "access_token", header, query = "access_token")]
 pub struct UserAuth {
-    #[serde(flatten)]
-    registered: RegisteredClaims,
-    id:         i32,
+    exp: u64,
+    id:  i32,
 }
 
 #[post("/login", data = "<model>")]
@@ -67,22 +63,15 @@ fn login_post(
         Ok(username) => match model.password.as_ref() {
             Ok(password) => {
                 if username.0 == "magiclen" && password.0 == "12345678" {
-                    let registered = RegisteredClaims {
-                        expiration: Some(
-                            (SystemTime::now() + Duration::from_secs(10))
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        ),
-                        ..RegisteredClaims::default()
-                    };
-
                     let user_auth = UserAuth {
-                        registered,
-                        id: 1,
+                        exp: (SystemTime::now() + Duration::from_secs(10))
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                        id:  1,
                     };
 
-                    user_auth.set_cookie(cookies);
+                    user_auth.add_cookie(cookies).unwrap();
 
                     map.insert(
                         "message",
@@ -116,19 +105,10 @@ fn login_get(cm: &State<TeraContextManager>, etag_if_none_match: &EtagIfNoneMatc
 
 #[allow(clippy::result_large_err)] // TODO should use `Box` after a newer Rocket is released
 #[get("/")]
-fn index(user_auth: Option<UserAuth>, cookies: &CookieJar) -> Result<String, Redirect> {
+fn index(user_auth: Option<UserAuth>) -> Result<String, Redirect> {
+    // An expired token is rejected by the request guard, which also drops the cookie carrying it.
     match user_auth {
-        Some(user_auth) => {
-            if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
-                > user_auth.registered.expiration.unwrap()
-            {
-                UserAuth::remove_cookie(cookies);
-
-                Ok(String::from("Login token expired, please log in again!"))
-            } else {
-                Ok(format!("Logged in user id = {}", user_auth.id))
-            }
-        },
+        Some(user_auth) => Ok(format!("Logged in user id = {}", user_auth.id)),
         None => Err(Redirect::temporary(uri!(login_get))),
     }
 }

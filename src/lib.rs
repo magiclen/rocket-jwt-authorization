@@ -3,441 +3,210 @@
 
 This crate provides a procedural macro to create request guards used for authorization.
 
-See `examples`.
-*/
+Deriving `JWT` turns a claims struct into a Rocket request guard which reads a JSON Web Token from a request, verifies its signature, and validates its claims (`exp` by default).
 
-mod panic;
+## Example
 
-use proc_macro::TokenStream;
-use quote::quote;
-use syn::{
-    DeriveInput, Expr, Lit, Meta, Path, Token,
-    parse::{Parse, ParseStream},
+```rust,no_run
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use rocket::{get, http::CookieJar, routes};
+use rocket_jwt_authorization::prelude::*;
+use serde::{Deserialize, Serialize};
+
+static SECRET_KEY: &str = "cc818bd5-6d16-4a67-b109-43d22d252f88";
+
+#[derive(Serialize, Deserialize, JWT)]
+#[jwt(key = SECRET_KEY, header, cookie = "access_token")]
+struct UserAuth {
+    exp: u64,
+    id:  i32,
+}
+
+#[get("/login")]
+fn login(cookies: &CookieJar) -> &'static str {
+    let user_auth = UserAuth {
+        exp: (SystemTime::now() + Duration::from_secs(3600))
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+        id:  1,
+    };
+
+    // Writes an `HttpOnly` + `SameSite=Strict` cookie which expires together with the token.
+    user_auth.add_cookie(cookies).unwrap();
+
+    "Logged in."
+}
+
+#[get("/")]
+fn index(user_auth: UserAuth) -> String {
+    format!("Logged in user id = {}", user_auth.id)
+}
+
+#[get("/logout")]
+fn logout(cookies: &CookieJar) -> &'static str {
+    UserAuth::remove_cookie(cookies);
+
+    "Logged out."
+}
+
+fn main() {
+    let _rocket = rocket::build().mount("/", routes![index, login, logout]);
+}
+```
+
+A token can also be created and verified without Rocket:
+
+```rust
+use rocket_jwt_authorization::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
+#[jwt(key = "cc818bd5-6d16-4a67-b109-43d22d252f88")]
+struct UserAuth {
+    exp: u64,
+    id:  i32,
+}
+
+let user_auth = UserAuth {
+    exp: jsonwebtoken::get_current_timestamp() + 3600,
+    id:  1,
 };
 
-const CORRECT_USAGE_FOR_JWT_ATTRIBUTE: &[&str] = &[
-    "#[jwt(\"key\")]",
-    "#[jwt(PATH)]",
-    "#[jwt(\"key\", sha2::Sha512)]",
-    "#[jwt(PATH, sha2::Sha512)]",
-    "#[jwt(PATH, sha2::Sha512, Header)]",
-    "#[jwt(PATH, sha2::Sha512, Cookie(\"access_token\"), Header, Query(PATH))]",
-];
+let token = user_auth.sign().unwrap();
 
-enum Source {
-    Header,
-    Cookie(Expr),
-    Query(Expr),
-    // TODO currently it's hard to be implemented, just ignore it
-    #[allow(dead_code)]
-    Body(Expr),
+assert_eq!(user_auth, UserAuth::verify(token).unwrap());
+```
+
+## Options of the `jwt` attribute
+
+| Option | Default | Description |
+| ------ | ------- | ----------- |
+| `key = EXPR` | | The shared secret, only for the `HS*` algorithms. Anything which is `AsRef<[u8]>` works. |
+| `encoding_key = EXPR` | | An [`EncodingKey`], needed instead of `key` by the asymmetric algorithms. |
+| `decoding_key = EXPR` | | A [`DecodingKey`], needed instead of `key` by the asymmetric algorithms. |
+| `algorithm = NAME` | `HS256` | One of `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`. |
+| `header` | used when no source is given | Reads `Authorization: Bearer <token>`. Written as `header(name = "x-auth", scheme = "Token")` to change the header or the scheme. |
+| `cookie = "name"` | | Reads a cookie. Written as `cookie(name = "…", path = "…", secure = true, http_only = false, same_site = "lax", max_age = false)` to change its attributes. |
+| `query = "name"` | | Reads a query parameter. |
+| `leeway = 60` | `60` | The number of seconds of clock skew allowed when `exp` and `nbf` are validated. |
+| `validate_exp = false` | `true` | Whether `exp` is validated. |
+| `validate_nbf = true` | `false` | Whether `nbf` is validated. |
+| `issuer = "…"` | | The accepted `iss` claims. An array accepts several of them. |
+| `audience = "…"` | | The accepted `aud` claims. An array accepts several of them. |
+| `required_claims = ["exp"]` | `["exp"]` | The claims a token has to carry. |
+| `forward` | | Makes a failing guard forward with `401 Unauthorized` instead of erroring with it. |
+
+Sources are tried in the order they are written. When no source is given, `header` is used.
+
+## Crypto backend
+
+[`jsonwebtoken`](https://crates.io/crates/jsonwebtoken) needs exactly one crypto backend. This crate enables the pure Rust one by default; to use AWS-LC instead, turn the default features off.
+
+```toml
+[dependencies]
+rocket-jwt-authorization = { version = "0.3", default-features = false, features = ["aws_lc_rs", "use_pem"] }
+```
+*/
+
+mod cookie;
+mod error;
+
+pub use cookie::CookieConfig;
+pub use error::JwtGuardError;
+pub use jsonwebtoken::{
+    self, Algorithm, DecodingKey, EncodingKey, Header, TokenData, Validation, errors, errors::Error,
+};
+use rocket::{
+    http::{Cookie, CookieJar},
+    request::Request,
+};
+pub use rocket_jwt_authorization_derive::JWT;
+use serde::{Serialize, de::DeserializeOwned};
+
+pub mod prelude {
+    pub use super::{FromJwtRequest, JWT, Jwt, JwtCookie};
 }
 
-impl Source {
+#[doc(hidden)]
+pub mod __private {
+    pub use std::sync::OnceLock;
+
+    pub use rocket;
+
+    /// Reads the token out of a header value like `Bearer abc`. The scheme is matched case-insensitively, as RFC 7235 requires.
     #[inline]
-    fn as_str(&self) -> &'static str {
-        match self {
-            Source::Header => "header",
-            Source::Cookie(_) => "cookie",
-            Source::Query(_) => "query",
-            Source::Body(_) => "body",
+    pub fn scheme_token<'a>(value: &'a str, scheme: &str) -> Option<&'a str> {
+        if scheme.is_empty() {
+            return Some(value.trim());
         }
-    }
 
-    #[inline]
-    fn from<S: AsRef<str>>(name: S, expr: Expr) -> Option<Source> {
-        let name = name.as_ref();
+        let (found, rest) = value.split_at_checked(scheme.len())?;
 
-        match name {
-            "query" => Some(Source::Query(expr)),
-            "cookie" => Some(Source::Cookie(expr)),
-            "body" => unimplemented!(),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    fn search<S: AsRef<str>>(sources: &[Source], name: S) -> Option<&Source> {
-        let name = name.as_ref();
-
-        sources.iter().find(|source| source.as_str() == name)
-    }
-
-    #[inline]
-    fn search_cookie_get_expr(sources: &[Source]) -> Option<&Expr> {
-        for source in sources.iter() {
-            if let Source::Cookie(expr) = source {
-                return Some(expr);
-            }
+        if !found.eq_ignore_ascii_case(scheme) {
+            return None;
         }
 
-        None
+        Some(rest.strip_prefix(' ')?.trim_start())
     }
 }
 
-struct Parser2 {
-    expr: Expr,
-}
+/// A set of claims which can be signed into a token and verified back. Implemented by `#[derive(JWT)]`.
+pub trait Jwt: Serialize + DeserializeOwned + Sized {
+    fn jwt_encoding_key() -> &'static EncodingKey;
 
-impl Parse for Parser2 {
+    fn jwt_decoding_key() -> &'static DecodingKey;
+
+    fn jwt_header() -> &'static Header;
+
+    fn jwt_validation() -> &'static Validation;
+
+    /// Signs these claims into a token.
     #[inline]
-    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
-        match input.parse::<Expr>() {
-            Ok(expr) => {
-                let pass = match &expr {
-                    Expr::Path(_) => true,
-                    Expr::Lit(lit) => matches!(lit.lit, Lit::Str(_)),
-                    _ => false,
-                };
-
-                if !pass {
-                    panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE);
-                }
-
-                Ok(Parser2 {
-                    expr,
-                })
-            },
-            _ => panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE),
-        }
+    fn sign(&self) -> Result<String, Error> {
+        jsonwebtoken::encode(Self::jwt_header(), self, Self::jwt_encoding_key())
     }
-}
 
-struct Parser {
-    key:       Expr,
-    algorithm: Path,
-    sources:   Vec<Source>,
-}
-
-impl Parse for Parser {
+    /// Verifies the signature of a token and validates its claims.
     #[inline]
-    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
-        let key = input.parse::<Parser2>()?.expr;
+    fn verify<T: AsRef<[u8]>>(token: T) -> Result<Self, Error> {
+        jsonwebtoken::decode::<Self>(token, Self::jwt_decoding_key(), Self::jwt_validation())
+            .map(|token_data| token_data.claims)
+    }
 
-        let (algorithm, sources): (Path, Vec<Source>) = {
-            if input.is_empty() {
-                (syn::parse2(quote!(::sha2::Sha256))?, vec![Source::Header])
-            } else {
-                input.parse::<Token!(,)>()?;
-
-                match input.parse::<Path>() {
-                    Ok(p) => {
-                        let mut sources = Vec::new();
-
-                        while !input.is_empty() {
-                            input.parse::<Token!(,)>()?;
-
-                            let m = input.parse::<Meta>()?;
-
-                            let attr_name = match m.path().get_ident() {
-                                Some(ident) => ident.to_string().to_ascii_lowercase(),
-                                None => {
-                                    panic::attribute_incorrect_format(
-                                        "jwt",
-                                        CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
-                                    );
-                                },
-                            };
-
-                            if Source::search(&sources, attr_name.as_str()).is_some() {
-                                panic::duplicated_source(attr_name.as_str());
-                            }
-
-                            match m {
-                                Meta::Path(_) => {
-                                    if attr_name.eq_ignore_ascii_case("header") {
-                                        sources.push(Source::Header);
-                                    } else {
-                                        panic::attribute_incorrect_format(
-                                            "jwt",
-                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
-                                        );
-                                    }
-                                },
-                                Meta::NameValue(v) => {
-                                    let expr = v.value;
-
-                                    let pass = match &expr {
-                                        Expr::Path(_) => true,
-                                        Expr::Lit(lit) => matches!(lit.lit, Lit::Str(_)),
-                                        _ => false,
-                                    };
-
-                                    if !pass {
-                                        panic::attribute_incorrect_format(
-                                            "jwt",
-                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
-                                        );
-                                    }
-
-                                    match Source::from(attr_name, expr) {
-                                        Some(source) => sources.push(source),
-                                        None => panic::attribute_incorrect_format(
-                                            "jwt",
-                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
-                                        ),
-                                    }
-                                },
-                                Meta::List(list) => {
-                                    let parsed: Parser2 = list.parse_args()?;
-
-                                    let expr = parsed.expr;
-
-                                    match Source::from(attr_name, expr) {
-                                        Some(source) => sources.push(source),
-                                        None => panic::attribute_incorrect_format(
-                                            "jwt",
-                                            CORRECT_USAGE_FOR_JWT_ATTRIBUTE,
-                                        ),
-                                    }
-                                },
-                            }
-                        }
-
-                        if sources.is_empty() {
-                            sources.push(Source::Header);
-                        }
-
-                        (p, sources)
-                    },
-                    Err(_) => {
-                        panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE)
-                    },
-                }
-            }
-        };
-
-        Ok(Parser {
-            key,
-            algorithm,
-            sources,
-        })
+    /// The `exp` claim, if there is one. It is what [`JwtCookie`] uses to set `Max-Age`.
+    #[inline]
+    fn expiration(&self) -> Option<u64> {
+        serde_json::to_value(self).ok()?.get("exp")?.as_u64()
     }
 }
 
-fn derive_input_handler(ast: DeriveInput) -> TokenStream {
-    for attr in ast.attrs {
-        if attr.path().is_ident("jwt") {
-            match attr.meta {
-                Meta::List(list) => {
-                    let parsed: Parser = list.parse_args().unwrap();
-
-                    let algorithm = parsed.algorithm;
-                    let key = parsed.key;
-                    let sources = parsed.sources;
-
-                    let name = &ast.ident;
-                    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
-
-                    let get_jwt_hasher = quote! {
-                        #[inline]
-                        pub fn get_jwt_hasher() -> &'static hmac::Hmac<#algorithm> {
-                            static START: ::std::sync::Once = ::std::sync::Once::new();
-                            static mut HMAC: Option<hmac::Hmac<#algorithm>> = None;
-
-                            unsafe {
-                                START.call_once(|| {
-                                    use ::hmac::Hmac;
-                                    use ::hmac::digest::KeyInit;
-
-                                    HMAC = Some(Hmac::new_from_slice(unsafe {#key}.as_ref()).unwrap())
-                                });
-
-                                HMAC.as_ref().unwrap()
-                            }
-                        }
-                    };
-
-                    let get_jwt_token = quote! {
-                        #[inline]
-                        pub fn get_jwt_token(&self) -> String {
-                            use ::jwt::SignWithKey;
-
-                            let hasher = Self::get_jwt_hasher();
-
-                            self.sign_with_key(hasher).unwrap()
-                        }
-                    };
-
-                    let verify_jwt_token = quote! {
-                        #[inline]
-                        pub fn verify_jwt_token<S: AsRef<str>>(token: S) -> Result<Self, ::jwt::Error> {
-                            use ::jwt::VerifyWithKey;
-
-                            let token = token.as_ref();
-
-                            let hasher = Self::get_jwt_hasher();
-
-                            token.verify_with_key(hasher)
-                        }
-                    };
-
-                    let (set_cookie, set_cookie_insecure, remove_cookie) = if let Some(expr) =
-                        Source::search_cookie_get_expr(&sources)
-                    {
-                        let set_cookie = quote! {
-                            #[inline]
-                            pub fn set_cookie(&self, cookies: &::rocket::http::CookieJar) {
-                                let mut cookie = ::rocket::http::Cookie::new(unsafe {#expr}, self.get_jwt_token());
-
-                                cookie.set_secure(true);
-
-                                cookies.add(cookie);
-                            }
-                        };
-
-                        let set_cookie_insecure = quote! {
-                            #[inline]
-                            pub fn set_cookie_insecure(&self, cookies: &::rocket::http::CookieJar) {
-                                let mut cookie = ::rocket::http::Cookie::new(unsafe {#expr}, self.get_jwt_token());
-
-                                cookie.set_same_site(::rocket::http::SameSite::Strict);
-
-                                cookies.add(cookie);
-                            }
-                        };
-
-                        let remove_cookie = quote! {
-                            #[inline]
-                            pub fn remove_cookie(cookies: &::rocket::http::CookieJar) {
-                                cookies.remove(::rocket::http::Cookie::named(unsafe {#expr}));
-                            }
-                        };
-
-                        (set_cookie, set_cookie_insecure, remove_cookie)
-                    } else {
-                        (quote!(), quote!(), quote!())
-                    };
-
-                    let (from_request, from_request_cache) = {
-                        let mut source_streams = Vec::with_capacity(sources.len());
-
-                        for source in sources.iter() {
-                            let source_stream = match source {
-                                Source::Header => {
-                                    quote! {
-                                        else if let Some(authorization) = request.headers().get("authorization").next() {
-                                            if let Some(token) = authorization.strip_prefix("Bearer ") {
-                                                match #name::verify_jwt_token(token) {
-                                                    Ok(o) => Some(o),
-                                                    Err(_) => None
-                                                }
-                                            } else {
-                                                None
-                                            }
-                                        }
-                                    }
-                                },
-                                Source::Cookie(expr) => {
-                                    quote! {
-                                        else if let Some(token) = request.cookies().get(unsafe {#expr}) {
-                                            match #name::verify_jwt_token(token.value()) {
-                                                Ok(o) => Some(o),
-                                                Err(_) => {
-                                                    #name::remove_cookie(&request.cookies());
-
-                                                    None
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                Source::Query(expr) => {
-                                    quote! {
-                                        else if let Some(token) = request.query_value(unsafe {#expr}) {
-                                            let token: &str = token.unwrap();
-
-                                            match #name::verify_jwt_token(token) {
-                                                Ok(o) => Some(o),
-                                                Err(_) => None
-                                            }
-                                        }
-                                    }
-                                },
-                                _ => unimplemented!(),
-                            };
-
-                            source_streams.push(source_stream);
-                        }
-
-                        let from_request_body = quote! {
-                            if false {
-                                None
-                            }
-                            #(
-                                #source_streams
-                            )*
-                            else {
-                                None
-                            }
-                        };
-
-                        let from_request = quote! {
-                            #[rocket::async_trait]
-                            impl<'r> ::rocket::request::FromRequest<'r> for #name {
-                                type Error = ();
-
-                                async fn from_request(request: &'r ::rocket::request::Request<'_>) -> ::rocket::request::Outcome<Self, Self::Error> {
-                                    match #from_request_body {
-                                        Some(o) => ::rocket::outcome::Outcome::Success(o),
-                                        None => ::rocket::outcome::Outcome::Forward(::rocket::http::Status::Unauthorized),
-                                    }
-                                }
-                            }
-                        };
-
-                        let from_request_cache = quote! {
-                            #[rocket::async_trait]
-                            impl<'r> ::rocket::request::FromRequest<'r> for &'r #name {
-                                type Error = ();
-
-                                async fn from_request(request: &'r ::rocket::request::Request<'_>) -> ::rocket::request::Outcome<Self, Self::Error> {
-                                    let cache = request.local_cache(|| {
-                                        #from_request_body
-                                    });
-
-                                    match cache.as_ref() {
-                                        Some(o) => ::rocket::outcome::Outcome::Success(o),
-                                        None => ::rocket::outcome::Outcome::Forward(::rocket::http::Status::Unauthorized),
-                                    }
-                                }
-                            }
-                        };
-
-                        (from_request, from_request_cache)
-                    };
-
-                    let jwt_impl = quote! {
-                        impl #impl_generics #name #ty_generics #where_clause {
-                            #get_jwt_hasher
-
-                            #get_jwt_token
-
-                            #verify_jwt_token
-
-                            #set_cookie
-
-                            #set_cookie_insecure
-
-                            #remove_cookie
-                        }
-
-                        #from_request
-
-                        #from_request_cache
-                    };
-
-                    return jwt_impl.into();
-                },
-                _ => panic::attribute_incorrect_format("jwt", CORRECT_USAGE_FOR_JWT_ATTRIBUTE),
-            }
-        }
-    }
-
-    panic::jwt_not_found();
+/// Reads a token from a request without going through Rocket's outcomes. Implemented by `#[derive(JWT)]`.
+pub trait FromJwtRequest: Jwt {
+    /// Tries every source of the `jwt` attribute in order.
+    fn from_jwt_request(request: &Request<'_>) -> Result<Self, JwtGuardError>;
 }
 
-#[proc_macro_derive(JWT, attributes(jwt))]
-pub fn jwt_derive(input: TokenStream) -> TokenStream {
-    derive_input_handler(syn::parse(input).unwrap())
+/// Stores a token in a cookie. Implemented by `#[derive(JWT)]` when the `jwt` attribute has a `cookie` source.
+pub trait JwtCookie: Jwt {
+    fn jwt_cookie_config() -> &'static CookieConfig;
+
+    /// Signs these claims into a cookie without adding it to a jar.
+    #[inline]
+    fn to_cookie(&self) -> Result<Cookie<'static>, Error> {
+        Ok(Self::jwt_cookie_config().build_cookie(self.sign()?, self.expiration()))
+    }
+
+    #[inline]
+    fn add_cookie(&self, cookies: &CookieJar<'_>) -> Result<(), Error> {
+        cookies.add(self.to_cookie()?);
+
+        Ok(())
+    }
+
+    #[inline]
+    fn remove_cookie(cookies: &CookieJar<'_>) {
+        cookies.remove(Self::jwt_cookie_config().build_removal_cookie());
+    }
 }
