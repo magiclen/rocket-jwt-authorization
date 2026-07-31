@@ -21,7 +21,7 @@ pub(crate) enum Key {
 /// Where a token can be read from in a request. Sources are tried in the order they are written in the attribute.
 pub(crate) enum Source {
     Header { name: Option<Expr>, scheme: Option<Expr> },
-    Cookie(CookieOptions),
+    Cookie(Box<CookieOptions>),
     Query { name: Expr },
 }
 
@@ -42,6 +42,7 @@ impl Source {
 
 pub(crate) struct CookieOptions {
     pub(crate) name:      Expr,
+    pub(crate) domain:    Option<Expr>,
     pub(crate) path:      Option<Expr>,
     pub(crate) secure:    Option<LitBool>,
     pub(crate) http_only: Option<LitBool>,
@@ -56,8 +57,10 @@ pub(crate) struct JwtAttribute {
     pub(crate) leeway:          Option<LitInt>,
     pub(crate) validate_exp:    Option<LitBool>,
     pub(crate) validate_nbf:    Option<LitBool>,
+    pub(crate) validate_aud:    Option<LitBool>,
     pub(crate) issuers:         Vec<Expr>,
     pub(crate) audiences:       Vec<Expr>,
+    pub(crate) subject:         Option<Expr>,
     pub(crate) required_claims: Option<Vec<Expr>>,
     pub(crate) forward:         bool,
 }
@@ -74,8 +77,10 @@ impl JwtAttribute {
         let mut leeway: Option<LitInt> = None;
         let mut validate_exp: Option<LitBool> = None;
         let mut validate_nbf: Option<LitBool> = None;
+        let mut validate_aud: Option<LitBool> = None;
         let mut issuers: Option<Vec<Expr>> = None;
         let mut audiences: Option<Vec<Expr>> = None;
+        let mut subject: Option<Expr> = None;
         let mut required_claims: Option<Vec<Expr>> = None;
         let mut forward = false;
 
@@ -91,8 +96,10 @@ impl JwtAttribute {
                 "leeway" => set_once(&mut leeway, int_value(meta)?, &name, span)?,
                 "validate_exp" => set_once(&mut validate_exp, bool_value(meta)?, &name, span)?,
                 "validate_nbf" => set_once(&mut validate_nbf, bool_value(meta)?, &name, span)?,
+                "validate_aud" => set_once(&mut validate_aud, bool_value(meta)?, &name, span)?,
                 "issuer" => set_once(&mut issuers, expr_list_value(meta)?, &name, span)?,
                 "audience" => set_once(&mut audiences, expr_list_value(meta)?, &name, span)?,
+                "subject" => set_once(&mut subject, expr_value(meta)?, &name, span)?,
                 "required_claims" => {
                     set_once(&mut required_claims, expr_list_value(meta)?, &name, span)?
                 },
@@ -170,8 +177,10 @@ impl JwtAttribute {
             leeway,
             validate_exp,
             validate_nbf,
+            validate_aud,
             issuers: issuers.unwrap_or_default(),
             audiences: audiences.unwrap_or_default(),
+            subject,
             required_claims,
             forward,
         })
@@ -230,6 +239,7 @@ fn parse_cookie_source(meta: Meta) -> Result<Source, Error> {
     let span = meta.span();
 
     let mut name: Option<Expr> = None;
+    let mut domain: Option<Expr> = None;
     let mut path: Option<Expr> = None;
     let mut secure: Option<LitBool> = None;
     let mut http_only: Option<LitBool> = None;
@@ -244,6 +254,7 @@ fn parse_cookie_source(meta: Meta) -> Result<Source, Error> {
 
                 match option.as_str() {
                     "name" => set_once(&mut name, expr_value(meta)?, &option, span)?,
+                    "domain" => set_once(&mut domain, expr_value(meta)?, &option, span)?,
                     "path" => set_once(&mut path, expr_value(meta)?, &option, span)?,
                     "secure" => set_once(&mut secure, bool_value(meta)?, &option, span)?,
                     "http_only" => set_once(&mut http_only, bool_value(meta)?, &option, span)?,
@@ -265,14 +276,15 @@ fn parse_cookie_source(meta: Meta) -> Result<Source, Error> {
         return Err(Error::new(span, "the `cookie` source needs a `name`"));
     };
 
-    Ok(Source::Cookie(CookieOptions {
+    Ok(Source::Cookie(Box::new(CookieOptions {
         name,
+        domain,
         path,
         secure,
         http_only,
         same_site,
         max_age,
-    }))
+    })))
 }
 
 /// Reads the name of a source written in its short form, like `cookie = "access_token"`.

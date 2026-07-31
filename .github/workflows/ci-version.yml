@@ -7,6 +7,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # `aws-lc-rs` needs NASM to build on Windows, so let it fall back to the prebuilt objects.
+  AWS_LC_SYS_PREBUILT_NASM: 1
 
 jobs:
   tests:
@@ -22,6 +24,8 @@ jobs:
           - nightly
         features:
           -
+          - "--no-default-features --features rust_crypto"
+          - "--no-default-features --features aws_lc_rs --features use_pem"
     name: Test ${{ matrix.toolchain }} on ${{ matrix.os }} (${{ matrix.features }})
     runs-on: ${{ matrix.os }}
     steps:
@@ -45,6 +49,8 @@ jobs:
           - 1.88
         features:
           -
+          - "--no-default-features --features rust_crypto"
+          - "--no-default-features --features aws_lc_rs --features use_pem"
     name: Test ${{ matrix.toolchain }} on ${{ matrix.os }} (${{ matrix.features }})
     runs-on: ${{ matrix.os }}
     steps:

@@ -8,7 +8,7 @@ repository = "https://github.com/magiclen/rocket-jwt-authorization"
 homepage = "https://magiclen.org/rocket-jwt-authorization"
 keywords = ["rocket", "server", "web", "authorization", "jwt"]
 categories = ["parser-implementations", "web-programming"]
-description = "This crate provides a procedural macro to create request guards used for authorization."
+description = "This crate provides the `JWT` derive macro of the rocket-jwt-authorization crate."
 license = "MIT"
 include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 
@@ -16,6 +16,6 @@ include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.107"
-quote = "1.0.47"
-syn = "3.0.3"
+proc-macro2 = "1.0.91"
+quote = "1.0.35"
+syn = { version = "3", features = ["full"] }

@@ -16,6 +16,22 @@ struct UserAuth {
     id:  i32,
 }
 
+/// A token whose `aud` claim is not checked, which needs `validate_aud` because `jsonwebtoken` validates it by default.
+#[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
+#[jwt(key = SECRET_KEY, validate_aud = false)]
+struct AnyAudienceAuth {
+    exp: u64,
+    aud: String,
+    id:  i32,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
+#[jwt(key = SECRET_KEY, cookie(name = "shared_token", domain = "example.com"))]
+struct SharedAuth {
+    exp: u64,
+    id:  i32,
+}
+
 #[get("/")]
 fn index(user_auth: UserAuth) -> String {
     user_auth.id.to_string()
@@ -28,6 +44,22 @@ fn login(cookies: &CookieJar) -> &'static str {
     "Logged in."
 }
 
+#[get("/any-audience")]
+fn any_audience(auth: AnyAudienceAuth) -> String {
+    auth.id.to_string()
+}
+
+#[get("/shared-login")]
+fn shared_login(cookies: &CookieJar) -> &'static str {
+    SharedAuth {
+        exp: jsonwebtoken::get_current_timestamp() + 3600, id: 1
+    }
+    .add_cookie(cookies)
+    .unwrap();
+
+    "Logged in."
+}
+
 fn user_auth(expires_in: i64) -> UserAuth {
     UserAuth {
         exp: jsonwebtoken::get_current_timestamp().saturating_add_signed(expires_in),
@@ -36,7 +68,8 @@ fn user_auth(expires_in: i64) -> UserAuth {
 }
 
 fn client() -> Client {
-    Client::tracked(Rocket::build().mount("/", routes![index, login])).unwrap()
+    Client::tracked(Rocket::build().mount("/", routes![index, login, any_audience, shared_login]))
+        .unwrap()
 }
 
 fn bearer(token: &str) -> Header<'static> {
@@ -134,4 +167,33 @@ fn added_cookie_is_protected() {
     assert!(cookie.max_age().is_some());
 
     assert_eq!(1, UserAuth::verify(cookie.value()).unwrap().id);
+}
+
+#[test]
+fn cookie_domain_is_set() {
+    let client = client();
+
+    let response = client.get("/shared-login").dispatch();
+
+    let cookie = response.cookies().get("shared_token").unwrap();
+
+    assert_eq!(Some("example.com"), cookie.domain());
+}
+
+#[test]
+fn audience_is_not_validated_when_turned_off() {
+    let client = client();
+
+    let auth = AnyAudienceAuth {
+        exp: jsonwebtoken::get_current_timestamp() + 3600,
+        aud: "somebody-else".to_string(),
+        id:  1,
+    };
+
+    let token = auth.sign().unwrap();
+
+    let response = client.get("/any-audience").header(bearer(token.as_str())).dispatch();
+
+    assert_eq!(Status::Ok, response.status());
+    assert_eq!("1", response.into_string().unwrap());
 }

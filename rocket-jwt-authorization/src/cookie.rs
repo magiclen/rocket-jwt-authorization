@@ -9,6 +9,7 @@ use rocket::{
 #[derive(Debug, Clone)]
 pub struct CookieConfig {
     name:      Cow<'static, str>,
+    domain:    Option<Cow<'static, str>>,
     path:      Option<Cow<'static, str>>,
     secure:    Option<bool>,
     http_only: bool,
@@ -22,6 +23,7 @@ impl CookieConfig {
     pub fn new<N: Into<Cow<'static, str>>>(name: N) -> Self {
         CookieConfig {
             name:      name.into(),
+            domain:    None,
             path:      Some(Cow::Borrowed("/")),
             secure:    None,
             http_only: true,
@@ -30,6 +32,15 @@ impl CookieConfig {
         }
     }
 
+    /// Sets `Domain`, which is only needed to share the cookie with subdomains. Without it the cookie is sent back to the exact host which set it.
+    #[inline]
+    pub fn domain<D: Into<Cow<'static, str>>>(mut self, domain: D) -> Self {
+        self.domain = Some(domain.into());
+
+        self
+    }
+
+    /// Sets `Path`, which limits the cookie to a part of the site. It defaults to `/`.
     #[inline]
     pub fn path<P: Into<Cow<'static, str>>>(mut self, path: P) -> Self {
         self.path = Some(path.into());
@@ -45,6 +56,7 @@ impl CookieConfig {
         self
     }
 
+    /// Sets `HttpOnly`, which hides the cookie from JavaScript. It is on by default.
     #[inline]
     pub fn http_only(mut self, http_only: bool) -> Self {
         self.http_only = http_only;
@@ -52,6 +64,8 @@ impl CookieConfig {
         self
     }
 
+    /// Sets `SameSite`, which decides whether the cookie travels with cross-site requests. It defaults to `Strict`.
+    /// A browser only accepts `SameSite=None` when `Secure` is set as well.
     #[inline]
     pub fn same_site(mut self, same_site: SameSite) -> Self {
         self.same_site = Some(same_site);
@@ -67,6 +81,7 @@ impl CookieConfig {
         self
     }
 
+    /// The name of the cookie which carries the token.
     #[inline]
     pub fn name(&self) -> &str {
         self.name.as_ref()
@@ -74,6 +89,10 @@ impl CookieConfig {
 
     pub(crate) fn build_cookie(&self, token: String, expiration: Option<u64>) -> Cookie<'static> {
         let mut cookie = Cookie::new(self.name.clone(), token);
+
+        if let Some(domain) = self.domain.as_ref() {
+            cookie.set_domain(domain.clone());
+        }
 
         if let Some(path) = self.path.as_ref() {
             cookie.set_path(path.clone());
@@ -100,9 +119,13 @@ impl CookieConfig {
         cookie
     }
 
-    /// `Path` has to be the same as the one used when the cookie was added, otherwise the browser keeps it.
+    /// `Domain` and `Path` have to be the same as the ones used when the cookie was added, otherwise the browser keeps it.
     pub(crate) fn build_removal_cookie(&self) -> Cookie<'static> {
         let mut cookie = Cookie::from(self.name.clone());
+
+        if let Some(domain) = self.domain.as_ref() {
+            cookie.set_domain(domain.clone());
+        }
 
         if let Some(path) = self.path.as_ref() {
             cookie.set_path(path.clone());

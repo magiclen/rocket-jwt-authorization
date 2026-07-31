@@ -3,7 +3,7 @@
 
 This crate provides the `JWT` derive macro of the [`rocket-jwt-authorization`](https://crates.io/crates/rocket-jwt-authorization) crate.
 
-Use `rocket-jwt-authorization` instead of depending on this crate directly.
+The generated code needs the traits which live in `rocket-jwt-authorization`, so depend on that crate instead. It re-exports this macro, and its documentation covers every option of the `jwt` attribute.
 */
 
 mod attribute;

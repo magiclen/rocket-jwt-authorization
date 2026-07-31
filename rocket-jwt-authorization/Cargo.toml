@@ -1,0 +1,48 @@
+[package]
+name = "rocket-jwt-authorization"
+version = "0.3.0"
+authors = ["Magic Len <len@magiclen.org>"]
+edition = "2024"
+rust-version = "1.88"
+repository = "https://github.com/magiclen/rocket-jwt-authorization"
+homepage = "https://magiclen.org/rocket-jwt-authorization"
+keywords = ["rocket", "server", "web", "authorization", "jwt"]
+categories = ["parser-implementations", "web-programming"]
+description = "This crate provides a procedural macro to create request guards used for authorization."
+license = "MIT"
+include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+rocket-jwt-authorization-derive = { version = "0.3", path = "../rocket-jwt-authorization-derive" }
+
+jsonwebtoken = { version = "11", default-features = false }
+rocket = "0.5"
+serde = "1.0.228"
+serde_json = "1.0.118"
+
+[dev-dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+
+rocket-include-tera = "0.6"
+
+validators = { version = "0.26", default-features = false, features = ["derive", "rocket", "regex"] }
+
+# The keys of this example are read from PEM files.
+[[example]]
+name = "asymmetric"
+required-features = ["use_pem"]
+
+[features]
+default = ["rust_crypto", "use_pem"]
+
+# Pure Rust cryptography. Exactly one of `rust_crypto` and `aws_lc_rs` needs to be enabled.
+rust_crypto = ["jsonwebtoken/rust_crypto"]
+# Cryptography backed by AWS-LC. Needs `default-features = false` to not enable `rust_crypto` as well.
+aws_lc_rs = ["jsonwebtoken/aws_lc_rs"]
+# Support for reading keys in the PEM format.
+use_pem = ["jsonwebtoken/use_pem"]
+
+[package.metadata.docs.rs]
+# `rust_crypto` and `aws_lc_rs` are mutually exclusive, so `all-features` cannot be used here.
+features = ["rust_crypto", "use_pem"]
+rustdoc-args = ["--cfg", "docsrs"]

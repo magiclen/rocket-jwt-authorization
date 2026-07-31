@@ -1,8 +1,41 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Error};
+use syn::{Data, DeriveInput, Error, Fields, Type};
 
 use crate::attribute::{JwtAttribute, Key, Source};
+
+/// The integer types an `exp` field is allowed to have for the fast path below.
+const TIMESTAMP_TYPES: [&str; 6] = ["u64", "u32", "usize", "i64", "i32", "isize"];
+
+/// Tells whether the claims have a plain `exp` field, so that `expiration` can read it directly instead of serializing everything.
+/// A field carrying a `serde` attribute is skipped, because it may be renamed or serialized as something which is not a timestamp.
+fn has_plain_exp_field(ast: &DeriveInput) -> bool {
+    let Data::Struct(data) = &ast.data else {
+        return false;
+    };
+
+    let Fields::Named(fields) = &data.fields else {
+        return false;
+    };
+
+    fields.named.iter().any(|field| {
+        if !field.ident.as_ref().is_some_and(|ident| ident == "exp") {
+            return false;
+        }
+
+        if field.attrs.iter().any(|attr| attr.path().is_ident("serde")) {
+            return false;
+        }
+
+        match &field.ty {
+            Type::Path(path) => path
+                .path
+                .get_ident()
+                .is_some_and(|ident| TIMESTAMP_TYPES.contains(&ident.to_string().as_str())),
+            _ => false,
+        }
+    })
+}
 
 pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
     let Some(attr) = ast.attrs.iter().find(|attr| attr.path().is_ident("jwt")) else {
@@ -51,6 +84,17 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
         validation_setters.push(quote!(validation.validate_nbf = #validate_nbf;));
     }
 
+    if let Some(validate_aud) = &attribute.validate_aud {
+        validation_setters.push(quote!(validation.validate_aud = #validate_aud;));
+    }
+
+    if let Some(subject) = &attribute.subject {
+        // `Validation` has `set_issuer` and `set_audience`, but no setter for `sub`.
+        validation_setters.push(quote! {
+            validation.sub = ::core::option::Option::Some(::std::string::ToString::to_string(&#subject));
+        });
+    }
+
     if !attribute.issuers.is_empty() {
         let issuers = &attribute.issuers;
 
@@ -67,6 +111,17 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
         validation_setters
             .push(quote!(validation.set_required_spec_claims(&[#(#required_claims),*]);));
     }
+
+    let expiration_impl = if has_plain_exp_field(&ast) {
+        quote! {
+            #[inline]
+            fn expiration(&self) -> ::core::option::Option<u64> {
+                ::core::convert::TryFrom::try_from(self.exp).ok()
+            }
+        }
+    } else {
+        quote!()
+    };
 
     let jwt_impl = quote! {
         impl #krate::Jwt for #name {
@@ -103,6 +158,8 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
                     validation
                 })
             }
+
+            #expiration_impl
         }
     };
 
@@ -114,6 +171,10 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
             let cookie_name = &options.name;
 
             let mut config_setters: Vec<TokenStream> = Vec::new();
+
+            if let Some(domain) = &options.domain {
+                config_setters.push(quote!(.domain(#domain)));
+            }
 
             if let Some(path) = &options.path {
                 config_setters.push(quote!(.path(#path)));
