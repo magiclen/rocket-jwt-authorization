@@ -182,22 +182,6 @@ rocket-jwt-authorization = { version = "0.3", default-features = false, features
 
 Enabling both `rust_crypto` and `aws_lc_rs`, or neither of them, still compiles, but signing and verifying then panic at runtime.
 
-## Examples
-
-Each of these is a runnable program in the [examples](examples) directory.
-
-| Example | Shows |
-| ------- | ----- |
-| [bearer](examples/bearer.rs) | The smallest possible setup: one protected route behind an `Authorization` header. |
-| [cookie_session](examples/cookie_session.rs) | A browser login session, with `add_cookie`, `remove_cookie` and `Option<UserAuth>`. |
-| [guard_variants](examples/guard_variants.rs) | `Option<T>`, `&T`, and a second claims type which forwards instead of answering `401`. |
-| [asymmetric](examples/asymmetric.rs) | `ES256` with an `encoding_key` and a `decoding_key` read from PEM files. |
-| [login](examples/login.rs) | A complete login form, rendered with Tera and validated with `validators`. |
-
-```bash
-cargo run --example bearer
-```
-
 ## Crates.io
 
 https://crates.io/crates/rocket-jwt-authorization

@@ -184,18 +184,6 @@ rocket-jwt-authorization = { version = "0.3", default-features = false, features
 ```
 
 Enabling both `rust_crypto` and `aws_lc_rs`, or neither of them, still compiles, but signing and verifying then panic at runtime.
-
-## Examples
-
-The `examples` directory of the repository has a runnable program for each of these:
-
-| Example | Shows |
-| ------- | ----- |
-| `bearer` | The smallest possible setup: one protected route behind an `Authorization` header. |
-| `cookie_session` | A browser login session, with `add_cookie`, `remove_cookie` and `Option<UserAuth>`. |
-| `guard_variants` | `Option<T>`, `&T`, and a second claims type which forwards instead of answering `401`. |
-| `asymmetric` | `ES256` with an `encoding_key` and a `decoding_key` read from PEM files. |
-| `login` | A complete login form, rendered with Tera and validated with `validators`. |
 */
 
 #![cfg_attr(docsrs, feature(doc_cfg))]

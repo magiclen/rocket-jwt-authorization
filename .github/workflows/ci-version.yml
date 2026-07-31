@@ -46,7 +46,7 @@ jobs:
           - macos-latest
           - windows-latest
         toolchain:
-          - 1.88
+          - 1.89
         features:
           -
           - "--no-default-features --features rust_crypto"
