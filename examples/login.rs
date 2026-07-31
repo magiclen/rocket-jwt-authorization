@@ -9,16 +9,16 @@ extern crate rocket_jwt_authorization;
 
 use std::{
     collections::HashMap,
+    sync::LazyLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use jwt::RegisteredClaims;
-use once_cell::sync::Lazy;
 use rocket::{
+    State,
     form::{self, Form},
     http::CookieJar,
     response::Redirect,
-    State,
 };
 use rocket_include_tera::{EtagIfNoneMatch, TeraContextManager, TeraResponse};
 use serde::{Deserialize, Serialize};
@@ -27,8 +27,8 @@ use validators_prelude::regex::Regex;
 
 static SECRET_KEY: &str = "cc818bd5-6d16-4a67-b109-43d22d252f88";
 
-static RE_USERNAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w{1,30}$").unwrap());
-static RE_PASSWORD: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[\S ]{8,}$").unwrap());
+static RE_USERNAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\w{1,30}$").unwrap());
+static RE_PASSWORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\S ]{8,}$").unwrap());
 
 #[derive(Debug, Clone, Validator)]
 #[validator(regex(regex = RE_USERNAME))]

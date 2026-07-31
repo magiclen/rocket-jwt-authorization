@@ -11,8 +11,8 @@ mod panic;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse::{Parse, ParseStream},
     DeriveInput, Expr, Lit, Meta, Path, Token,
+    parse::{Parse, ParseStream},
 };
 
 const CORRECT_USAGE_FOR_JWT_ATTRIBUTE: &[&str] = &[
