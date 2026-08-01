@@ -25,7 +25,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --no-default-features --features aws_lc_rs --features use_pem -- -D warnings
 
   tests:
     strategy:

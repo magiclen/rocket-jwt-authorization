@@ -51,18 +51,20 @@ pub(crate) struct CookieOptions {
 }
 
 pub(crate) struct JwtAttribute {
-    pub(crate) key:             Key,
-    pub(crate) algorithm:       Ident,
-    pub(crate) sources:         Vec<Source>,
-    pub(crate) leeway:          Option<LitInt>,
-    pub(crate) validate_exp:    Option<LitBool>,
-    pub(crate) validate_nbf:    Option<LitBool>,
-    pub(crate) validate_aud:    Option<LitBool>,
-    pub(crate) issuers:         Vec<Expr>,
-    pub(crate) audiences:       Vec<Expr>,
-    pub(crate) subject:         Option<Expr>,
-    pub(crate) required_claims: Option<Vec<Expr>>,
-    pub(crate) forward:         bool,
+    pub(crate) key:                Key,
+    pub(crate) algorithm:          Ident,
+    pub(crate) sources:            Vec<Source>,
+    pub(crate) realm:              Option<Expr>,
+    pub(crate) leeway:             Option<LitInt>,
+    pub(crate) reject_expiring_in: Option<LitInt>,
+    pub(crate) validate_exp:       Option<LitBool>,
+    pub(crate) validate_nbf:       Option<LitBool>,
+    pub(crate) validate_aud:       Option<LitBool>,
+    pub(crate) issuers:            Vec<Expr>,
+    pub(crate) audiences:          Vec<Expr>,
+    pub(crate) subject:            Option<Expr>,
+    pub(crate) required_claims:    Option<Vec<Expr>>,
+    pub(crate) forward:            bool,
 }
 
 impl JwtAttribute {
@@ -74,7 +76,9 @@ impl JwtAttribute {
         let mut decoding_key: Option<Expr> = None;
         let mut algorithm: Option<Ident> = None;
         let mut sources: Vec<Source> = Vec::new();
+        let mut realm: Option<Expr> = None;
         let mut leeway: Option<LitInt> = None;
+        let mut reject_expiring_in: Option<LitInt> = None;
         let mut validate_exp: Option<LitBool> = None;
         let mut validate_nbf: Option<LitBool> = None;
         let mut validate_aud: Option<LitBool> = None;
@@ -82,7 +86,7 @@ impl JwtAttribute {
         let mut audiences: Option<Vec<Expr>> = None;
         let mut subject: Option<Expr> = None;
         let mut required_claims: Option<Vec<Expr>> = None;
-        let mut forward = false;
+        let mut forward: Option<LitBool> = None;
 
         for meta in metas {
             let name = option_name(&meta)?;
@@ -93,7 +97,11 @@ impl JwtAttribute {
                 "encoding_key" => set_once(&mut encoding_key, expr_value(meta)?, &name, span)?,
                 "decoding_key" => set_once(&mut decoding_key, expr_value(meta)?, &name, span)?,
                 "algorithm" => set_once(&mut algorithm, algorithm_value(meta)?, &name, span)?,
+                "realm" => set_once(&mut realm, expr_value(meta)?, &name, span)?,
                 "leeway" => set_once(&mut leeway, int_value(meta)?, &name, span)?,
+                "reject_expiring_in" => {
+                    set_once(&mut reject_expiring_in, int_value(meta)?, &name, span)?
+                },
                 "validate_exp" => set_once(&mut validate_exp, bool_value(meta)?, &name, span)?,
                 "validate_nbf" => set_once(&mut validate_nbf, bool_value(meta)?, &name, span)?,
                 "validate_aud" => set_once(&mut validate_aud, bool_value(meta)?, &name, span)?,
@@ -103,7 +111,7 @@ impl JwtAttribute {
                 "required_claims" => {
                     set_once(&mut required_claims, expr_list_value(meta)?, &name, span)?
                 },
-                "forward" => forward = bool_value(meta)?.value(),
+                "forward" => set_once(&mut forward, bool_value(meta)?, &name, span)?,
                 "header" | "cookie" | "query" => {
                     let source = parse_source(meta, name.as_str())?;
 
@@ -170,11 +178,23 @@ impl JwtAttribute {
             });
         }
 
+        if let Some(realm) = realm.as_ref()
+            && !sources.iter().any(|source| matches!(source, Source::Header { .. }))
+        {
+            return Err(Error::new_spanned(
+                realm,
+                "`realm` needs a `header` source, because a `WWW-Authenticate` challenge only \
+                 makes sense for a token which is read from a header",
+            ));
+        }
+
         Ok(JwtAttribute {
             key,
             algorithm,
             sources,
+            realm,
             leeway,
+            reject_expiring_in,
             validate_exp,
             validate_nbf,
             validate_aud,
@@ -182,7 +202,7 @@ impl JwtAttribute {
             audiences: audiences.unwrap_or_default(),
             subject,
             required_claims,
-            forward,
+            forward: forward.is_some_and(|forward| forward.value()),
         })
     }
 }
@@ -275,6 +295,20 @@ fn parse_cookie_source(meta: Meta) -> Result<Source, Error> {
     let Some(name) = name else {
         return Err(Error::new(span, "the `cookie` source needs a `name`"));
     };
+
+    // A browser throws away a `SameSite=None` cookie which is not `Secure`, so this pair can never work.
+    // Leaving `secure` out is fine, because Rocket sets the attribute itself when it serves over TLS.
+    if let Some(same_site) = same_site.as_ref()
+        && same_site == "None"
+        && let Some(secure) = secure.as_ref()
+        && !secure.value()
+    {
+        return Err(Error::new(
+            secure.span(),
+            "`same_site = \"none\"` needs `secure = true`, because a browser drops a \
+             `SameSite=None` cookie which is not `Secure`",
+        ));
+    }
 
     Ok(Source::Cookie(Box::new(CookieOptions {
         name,

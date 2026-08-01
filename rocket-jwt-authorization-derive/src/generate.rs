@@ -1,6 +1,7 @@
-use proc_macro2::TokenStream;
+use proc_macro_crate::{FoundCrate, crate_name};
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{Data, DeriveInput, Error, Fields, Type};
+use syn::{Data, DeriveInput, Error, Fields, Ident, Type};
 
 use crate::attribute::{JwtAttribute, Key, Source};
 
@@ -37,10 +38,34 @@ fn has_plain_exp_field(ast: &DeriveInput) -> bool {
     })
 }
 
+fn runtime_crate() -> Result<TokenStream, Error> {
+    let found = crate_name("rocket-jwt-authorization").map_err(|error| {
+        Error::new(
+            Span::call_site(),
+            format!("cannot find the `rocket-jwt-authorization` crate: {error}"),
+        )
+    })?;
+
+    Ok(match found {
+        FoundCrate::Itself => quote!(::rocket_jwt_authorization),
+        FoundCrate::Name(name) => {
+            let name = Ident::new(&name, Span::call_site());
+
+            quote!(::#name)
+        },
+    })
+}
+
 pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
-    let Some(attr) = ast.attrs.iter().find(|attr| attr.path().is_ident("jwt")) else {
+    let mut attrs = ast.attrs.iter().filter(|attr| attr.path().is_ident("jwt"));
+
+    let Some(attr) = attrs.next() else {
         return Err(Error::new(ast.ident.span(), "cannot find the `jwt` attribute"));
     };
+
+    if let Some(attr) = attrs.next() {
+        return Err(Error::new_spanned(attr, "the `jwt` attribute is duplicated"));
+    }
 
     if !ast.generics.params.is_empty() {
         return Err(Error::new_spanned(
@@ -53,27 +78,70 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
     let attribute = JwtAttribute::parse(attr)?;
 
     let name = &ast.ident;
-    let krate = quote!(::rocket_jwt_authorization);
-    let private = quote!(::rocket_jwt_authorization::__private);
-    let rocket = quote!(::rocket_jwt_authorization::__private::rocket);
+    let krate = runtime_crate()?;
+    let private = quote!(#krate::__private);
+    let rocket = quote!(#krate::__private::rocket);
 
     let algorithm = &attribute.algorithm;
 
-    let (encoding_key, decoding_key) = match &attribute.key {
-        Key::Secret(secret) => (
-            quote!(#krate::EncodingKey::from_secret(::core::convert::AsRef::<[u8]>::as_ref(&#secret))),
-            quote!(#krate::DecodingKey::from_secret(::core::convert::AsRef::<[u8]>::as_ref(&#secret))),
-        ),
+    let (key_storage, key_getters) = match &attribute.key {
+        Key::Secret(secret) => {
+            let initialize_keys = quote! {
+                let secret = #secret;
+                let secret = ::core::convert::AsRef::<[u8]>::as_ref(&secret);
+
+                (
+                    #krate::EncodingKey::from_secret(secret),
+                    #krate::DecodingKey::from_secret(secret),
+                )
+            };
+
+            (
+                quote! {
+                    static KEYS: #private::OnceLock<(#krate::EncodingKey, #krate::DecodingKey)> = #private::OnceLock::new();
+                },
+                quote! {
+                    #[inline]
+                    fn jwt_encoding_key() -> &'static #krate::EncodingKey {
+                        &KEYS.get_or_init(|| { #initialize_keys }).0
+                    }
+
+                    #[inline]
+                    fn jwt_decoding_key() -> &'static #krate::DecodingKey {
+                        &KEYS.get_or_init(|| { #initialize_keys }).1
+                    }
+                },
+            )
+        },
         Key::Pair {
             encoding,
             decoding,
-        } => (quote!(#encoding), quote!(#decoding)),
+        } => (quote!(), quote! {
+            #[inline]
+            fn jwt_encoding_key() -> &'static #krate::EncodingKey {
+                static KEY: #private::OnceLock<#krate::EncodingKey> = #private::OnceLock::new();
+
+                KEY.get_or_init(|| #encoding)
+            }
+
+            #[inline]
+            fn jwt_decoding_key() -> &'static #krate::DecodingKey {
+                static KEY: #private::OnceLock<#krate::DecodingKey> = #private::OnceLock::new();
+
+                KEY.get_or_init(|| #decoding)
+            }
+        }),
     };
 
     let mut validation_setters: Vec<TokenStream> = Vec::new();
 
     if let Some(leeway) = &attribute.leeway {
         validation_setters.push(quote!(validation.leeway = #leeway;));
+    }
+
+    if let Some(reject_expiring_in) = &attribute.reject_expiring_in {
+        validation_setters
+            .push(quote!(validation.reject_tokens_expiring_in_less_than = #reject_expiring_in;));
     }
 
     if let Some(validate_exp) = &attribute.validate_exp {
@@ -124,43 +192,35 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
     };
 
     let jwt_impl = quote! {
-        impl #krate::Jwt for #name {
-            #[inline]
-            fn jwt_encoding_key() -> &'static #krate::EncodingKey {
-                static KEY: #private::OnceLock<#krate::EncodingKey> = #private::OnceLock::new();
+        const _: () = {
+            #key_storage
 
-                KEY.get_or_init(|| #encoding_key)
+            impl #krate::Jwt for #name {
+                #key_getters
+
+                #[inline]
+                fn jwt_header() -> &'static #krate::Header {
+                    static HEADER: #private::OnceLock<#krate::Header> = #private::OnceLock::new();
+
+                    HEADER.get_or_init(|| #krate::Header::new(#krate::Algorithm::#algorithm))
+                }
+
+                #[inline]
+                fn jwt_validation() -> &'static #krate::Validation {
+                    static VALIDATION: #private::OnceLock<#krate::Validation> = #private::OnceLock::new();
+
+                    VALIDATION.get_or_init(|| {
+                        let mut validation = #krate::Validation::new(#krate::Algorithm::#algorithm);
+
+                        #(#validation_setters)*
+
+                        validation
+                    })
+                }
+
+                #expiration_impl
             }
-
-            #[inline]
-            fn jwt_decoding_key() -> &'static #krate::DecodingKey {
-                static KEY: #private::OnceLock<#krate::DecodingKey> = #private::OnceLock::new();
-
-                KEY.get_or_init(|| #decoding_key)
-            }
-
-            #[inline]
-            fn jwt_header() -> &'static #krate::Header {
-                static HEADER: #private::OnceLock<#krate::Header> = #private::OnceLock::new();
-
-                HEADER.get_or_init(|| #krate::Header::new(#krate::Algorithm::#algorithm))
-            }
-
-            #[inline]
-            fn jwt_validation() -> &'static #krate::Validation {
-                static VALIDATION: #private::OnceLock<#krate::Validation> = #private::OnceLock::new();
-
-                VALIDATION.get_or_init(|| {
-                    let mut validation = #krate::Validation::new(#krate::Algorithm::#algorithm);
-
-                    #(#validation_setters)*
-
-                    validation
-                })
-            }
-
-            #expiration_impl
-        }
+        };
     };
 
     let jwt_cookie_impl = match attribute.sources.iter().find_map(|source| match source {
@@ -210,6 +270,55 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
         None => quote!(),
     };
 
+    // A challenge names the scheme the `header` source expects, so a guard which never looks at a header has nothing to challenge with.
+    let header_scheme = attribute.sources.iter().find_map(|source| match source {
+        Source::Header {
+            scheme, ..
+        } => Some(scheme),
+        _ => None,
+    });
+
+    let jwt_challenge_impl = match header_scheme {
+        Some(scheme) => {
+            let scheme = match scheme {
+                Some(scheme) => quote!(#scheme),
+                None => quote!("Bearer"),
+            };
+
+            // Both options take any `AsRef<str>`, and the config owns its strings, so copy them once when it is built.
+            let realm_setter = match &attribute.realm {
+                Some(realm) => quote! {
+                    .realm(::std::borrow::ToOwned::to_owned(::core::convert::AsRef::<str>::as_ref(&#realm)))
+                },
+                None => quote!(),
+            };
+
+            quote! {
+                impl #krate::JwtChallenge for #name {
+                    #[inline]
+                    fn jwt_challenge_config() -> &'static #krate::ChallengeConfig {
+                        static CONFIG: #private::OnceLock<#krate::ChallengeConfig> = #private::OnceLock::new();
+
+                        CONFIG.get_or_init(|| {
+                            #krate::ChallengeConfig::new(::std::borrow::ToOwned::to_owned(::core::convert::AsRef::<str>::as_ref(&#scheme)))
+                                #realm_setter
+                        })
+                    }
+                }
+            }
+        },
+        None => quote!(),
+    };
+
+    let record_challenge = match header_scheme {
+        Some(_) => quote! {
+            if let ::core::result::Result::Err(error) = &result {
+                #private::record_challenge(request, <#name as #krate::JwtChallenge>::jwt_challenge_config(), error);
+            }
+        },
+        None => quote!(),
+    };
+
     let mut source_blocks: Vec<TokenStream> = Vec::with_capacity(attribute.sources.len());
 
     for source in attribute.sources.iter() {
@@ -247,6 +356,8 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
                                 ::core::result::Result::Err(error) => {
                                     // A token that cannot be verified is never going to work, so stop the browser from sending it again.
                                     <Self as #krate::JwtCookie>::remove_cookie(cookies);
+                                    // Rocket resets the cookie changes of a request whose guard fails, so leave the removal for `JwtFairing` as well.
+                                    #private::record_cookie_removal(request, <Self as #krate::JwtCookie>::jwt_cookie_config());
 
                                     ::core::result::Result::Err(#krate::JwtGuardError::Invalid(error))
                                 },
@@ -302,7 +413,11 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
             type Error = #krate::JwtGuardError;
 
             async fn from_request(request: &'r #rocket::request::Request<'_>) -> #rocket::request::Outcome<Self, Self::Error> {
-                match <Self as #krate::FromJwtRequest>::from_jwt_request(request) {
+                let result = <Self as #krate::FromJwtRequest>::from_jwt_request(request);
+
+                #record_challenge
+
+                match result {
                     ::core::result::Result::Ok(claims) => #rocket::outcome::Outcome::Success(claims),
                     #error_arm
                 }
@@ -315,11 +430,13 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
 
             async fn from_request(request: &'r #rocket::request::Request<'_>) -> #rocket::request::Outcome<Self, Self::Error> {
                 // The result is cached in the request, so several guards in the same route only verify the token once.
-                let cache: &::core::result::Result<#name, #krate::JwtGuardError> = request.local_cache(|| {
+                let result: &::core::result::Result<#name, #krate::JwtGuardError> = request.local_cache(|| {
                     <#name as #krate::FromJwtRequest>::from_jwt_request(request)
                 });
 
-                match cache {
+                #record_challenge
+
+                match result {
                     ::core::result::Result::Ok(claims) => #rocket::outcome::Outcome::Success(claims),
                     #cached_error_arm
                 }
@@ -331,6 +448,8 @@ pub(crate) fn expand(ast: DeriveInput) -> Result<TokenStream, Error> {
         #jwt_impl
 
         #jwt_cookie_impl
+
+        #jwt_challenge_impl
 
         #from_jwt_request_impl
 

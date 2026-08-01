@@ -85,7 +85,41 @@ fn logout(cookies: &CookieJar) -> &'static str {
 
 The cookie is `HttpOnly`, `SameSite=Strict` and `Path=/`, and its `Max-Age` follows the `exp` claim, so it disappears from the browser when the token stops being valid. Use `cookie(...)` instead of `cookie = "…"` to change any of that.
 
-When a cookie holds a token which cannot be verified, the guard also clears the cookie, because the browser would otherwise keep sending a token which is never going to work again.
+When a cookie holds a token which cannot be verified, the guard also clears the cookie, because the browser would otherwise keep sending a token which is never going to work again. Attaching `JwtFairing` is what makes that happen on a `401` answer as well; see the section below.
+
+## Answering with `WWW-Authenticate`
+
+RFC 7235 asks every `401 Unauthorized` to say how a client is supposed to authenticate. Rocket answers a failed guard from a catcher, and a catcher knows nothing about the guard which failed, so the challenge needs one fairing to carry it across.
+
+```rust
+#[derive(Serialize, Deserialize, JWT)]
+#[jwt(key = SECRET_KEY, realm = "api")]
+struct UserAuth {
+    exp: u64,
+    id: i32,
+}
+
+#[get("/")]
+fn index(user_auth: UserAuth) -> String {
+    format!("Logged in user id = {}", user_auth.id)
+}
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build().attach(JwtFairing).mount("/", routes![index])
+}
+```
+
+A request which never carried a token is answered with a bare challenge, because RFC 6750 asks a server not to report an error to a client which did not try in the first place. Everything else is an `invalid_token` with a short description of what was wrong.
+
+| Request | `WWW-Authenticate` |
+| ------- | ------------------ |
+| no token | `Bearer realm="api"` |
+| expired token | `Bearer realm="api", error="invalid_token", error_description="the token has expired"` |
+
+The descriptions come from a fixed list, so nothing an attacker controls and no internal detail can reach the header. The scheme is the one the `header` source expects, and `realm` is optional; without it a challenge is just `Bearer`.
+
+The same fairing also puts back the removal of a cookie which held an unusable token, which Rocket otherwise drops on its way to the catcher. A guard which is written as `Option<T>`, or which forwards to a route that answers normally, clears the cookie without the fairing.
 
 ## Three ways to write the guard
 
@@ -150,6 +184,7 @@ Sources are tried in the order they are written. When none is given, `header` is
 | Option | Default | Description |
 | ------ | ------- | ----------- |
 | `leeway = 60` | `60` | The number of seconds of clock skew allowed when `exp` and `nbf` are validated. |
+| `reject_expiring_in = 30` | `0` | Rejects a token which expires within this many seconds, so that one cannot run out while it is still travelling. |
 | `validate_exp = false` | `true` | Whether `exp` is validated. |
 | `validate_nbf = true` | `false` | Whether `nbf` is validated. |
 | `validate_aud = false` | `true` | Whether `aud` is validated. |
@@ -162,13 +197,14 @@ Sources are tried in the order they are written. When none is given, `header` is
 
 | Option | Description |
 | ------ | ----------- |
+| `realm = "…"` | The realm of the `WWW-Authenticate` challenge. Needs a `header` source. |
 | `forward` | Makes a failing guard forward with `401 Unauthorized` instead of answering with it. |
 
 ## Things to watch out for
 
 * Claims which carry an `aud` field are rejected unless the guard also has an `audience` option, because that is what RFC 7519 asks for. Set `validate_aud = false` to accept any audience.
 * A token in a query parameter ends up in the URL, which proxies and access logs tend to keep. Prefer the header or a cookie whenever there is a choice.
-* A browser only accepts `same_site = "none"` when `secure = true` is set as well.
+* A browser only accepts `same_site = "none"` when `secure = true` is set as well, so writing `secure = false` next to it is a compile error.
 * The `jwt` attribute takes an expression for `key`, `encoding_key` and `decoding_key`, so the key can be read at runtime instead of being written into the source. It is evaluated once, on the first request which needs it.
 
 ## Crypto backend
@@ -180,7 +216,7 @@ Sources are tried in the order they are written. When none is given, `header` is
 rocket-jwt-authorization = { version = "0.3", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 ```
 
-Enabling both `rust_crypto` and `aws_lc_rs`, or neither of them, still compiles, but signing and verifying then panic at runtime.
+Enabling both `rust_crypto` and `aws_lc_rs`, or neither of them, is a compile error.
 
 ## Crates.io
 

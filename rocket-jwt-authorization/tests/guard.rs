@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use rocket::{
     Rocket, get,
     http::{Cookie, CookieJar, Header, SameSite, Status},
@@ -8,9 +10,22 @@ use rocket_jwt_authorization::{jsonwebtoken, prelude::*};
 use serde::{Deserialize, Serialize};
 
 static SECRET_KEY: &str = "cc818bd5-6d16-4a67-b109-43d22d252f88";
+static KEY_EVALUATIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn evaluated_secret_key() -> &'static str {
+    KEY_EVALUATIONS.fetch_add(1, Ordering::Relaxed);
+
+    SECRET_KEY
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
-#[jwt(key = SECRET_KEY, header, cookie = "access_token", query = "access_token")]
+#[jwt(
+    key = SECRET_KEY,
+    realm = "test",
+    header,
+    cookie = "access_token",
+    query = "access_token"
+)]
 struct UserAuth {
     exp: u64,
     id:  i32,
@@ -30,6 +45,24 @@ struct AnyAudienceAuth {
 struct SharedAuth {
     exp: u64,
     id:  i32,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
+#[jwt(key = SECRET_KEY, realm = "optional")]
+struct OptionalAuth {
+    exp: u64,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
+#[jwt(key = SECRET_KEY, realm = "required")]
+struct RequiredAuth {
+    exp: u64,
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, JWT)]
+#[jwt(key = evaluated_secret_key())]
+struct EvaluatedOnceAuth {
+    exp: u64,
 }
 
 #[get("/")]
@@ -60,6 +93,9 @@ fn shared_login(cookies: &CookieJar) -> &'static str {
     "Logged in."
 }
 
+#[get("/mixed-guards")]
+fn mixed_guards(_optional: Option<OptionalAuth>, _required: RequiredAuth) {}
+
 fn user_auth(expires_in: i64) -> UserAuth {
     UserAuth {
         exp: jsonwebtoken::get_current_timestamp().saturating_add_signed(expires_in),
@@ -68,8 +104,14 @@ fn user_auth(expires_in: i64) -> UserAuth {
 }
 
 fn client() -> Client {
-    Client::tracked(Rocket::build().mount("/", routes![index, login, any_audience, shared_login]))
-        .unwrap()
+    Client::tracked(Rocket::build().attach(JwtFairing).mount("/", routes![
+        index,
+        login,
+        any_audience,
+        shared_login,
+        mixed_guards
+    ]))
+    .unwrap()
 }
 
 fn bearer(token: &str) -> Header<'static> {
@@ -83,6 +125,18 @@ fn sign_and_verify() {
     let token = user_auth.sign().unwrap();
 
     assert_eq!(user_auth, UserAuth::verify(token).unwrap());
+}
+
+#[test]
+fn secret_key_expression_is_evaluated_once() {
+    let auth = EvaluatedOnceAuth {
+        exp: jsonwebtoken::get_current_timestamp() + 3600
+    };
+
+    let token = auth.sign().unwrap();
+
+    assert_eq!(auth, EvaluatedOnceAuth::verify(token).unwrap());
+    assert_eq!(1, KEY_EVALUATIONS.load(Ordering::Relaxed));
 }
 
 #[test]
@@ -178,6 +232,59 @@ fn cookie_domain_is_set() {
     let cookie = response.cookies().get("shared_token").unwrap();
 
     assert_eq!(Some("example.com"), cookie.domain());
+}
+
+#[test]
+fn challenge_is_sent_when_the_token_is_missing() {
+    let client = client();
+
+    let response = client.get("/").dispatch();
+
+    assert_eq!(Status::Unauthorized, response.status());
+    assert_eq!(Some("Bearer realm=\"test\""), response.headers().get_one("WWW-Authenticate"));
+}
+
+#[test]
+fn challenge_reports_an_expired_token() {
+    let client = client();
+
+    let token = user_auth(-3600).sign().unwrap();
+
+    let response = client.get("/").header(bearer(token.as_str())).dispatch();
+
+    assert_eq!(Status::Unauthorized, response.status());
+    assert_eq!(
+        Some(
+            "Bearer realm=\"test\", error=\"invalid_token\", error_description=\"the token has \
+             expired\""
+        ),
+        response.headers().get_one("WWW-Authenticate")
+    );
+}
+
+#[test]
+fn challenge_comes_from_the_guard_that_rejects_the_request() {
+    let client = client();
+
+    let response = client.get("/mixed-guards").dispatch();
+
+    assert_eq!(Status::Unauthorized, response.status());
+    assert_eq!(Some("Bearer realm=\"required\""), response.headers().get_one("WWW-Authenticate"));
+}
+
+#[test]
+fn invalid_cookie_is_removed() {
+    let client = client();
+
+    let token = user_auth(-3600).sign().unwrap();
+
+    let response = client.get("/").cookie(Cookie::new("access_token", token)).dispatch();
+
+    assert_eq!(Status::Unauthorized, response.status());
+
+    let cookie = response.cookies().get("access_token").unwrap();
+
+    assert_eq!("", cookie.value());
 }
 
 #[test]
