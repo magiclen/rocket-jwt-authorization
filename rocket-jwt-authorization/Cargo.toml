@@ -1,6 +1,6 @@
 [package]
 name = "rocket-jwt-authorization"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Magic Len <len@magiclen.org>"]
 edition = "2024"
 rust-version = "1.89"
@@ -13,7 +13,7 @@ license = "MIT"
 include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
-rocket-jwt-authorization-derive = { version = "0.3", path = "../rocket-jwt-authorization-derive" }
+rocket-jwt-authorization-derive = { version = "0.3.1", path = "../rocket-jwt-authorization-derive" }
 
 jsonwebtoken = { version = "11", default-features = false }
 rocket = "0.5"
